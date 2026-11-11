@@ -46,8 +46,8 @@ These are known and accepted for a single-user tool on the user's own Mac.
 - **Link checks resolve the name once.** A host whose address changes between
   the check and the request is not caught.
 - **Dependencies.** The kit takes npm's non-breaking security fixes on every
-  release. Advisories that need a breaking upgrade (currently Next.js 16) are
-  listed by `npm audit` until that upgrade is done.
+  release. An advisory that needs a breaking upgrade stays listed by
+  `npm audit` until that upgrade is done.
 - **The daily search** stores a Claude Code token for unattended runs in
   `~/.config/kairos/claude-oauth-token`; the getting-started guide has the user
   make it readable by them only.
