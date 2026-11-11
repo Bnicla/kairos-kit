@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+build/
+
+# secrets: never commit
+.env
+.env.local
+.env*.local
+*.pem
+
+# typescript
+*.tsbuildinfo
+
+# misc
+.DS_Store
+npm-debug.log*
+scratch/
+
+# Your data lives in KAIROS_HOME (default ~/Kairos), outside this folder.
+# If you point KAIROS_HOME inside the kit by mistake, keep it out of git:
+/Kairos/
+
+# Where install.sh recorded your data folder (a path on this Mac only).
+.kairos-home

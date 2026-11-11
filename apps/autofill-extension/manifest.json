@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Kairos Autofill",
+  "version": "0.1.0",
+  "description": "Fill job applications from your Kairos knowledge base. Local-only, human-in-the-loop, never auto-submits.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://boards.greenhouse.io/*",
+    "https://job-boards.greenhouse.io/*",
+    "https://job-boards.eu.greenhouse.io/*",
+    "https://*.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.eu.lever.co/*",
+    "https://jobs.ashbyhq.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://job-boards.eu.greenhouse.io/*",
+        "https://*.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.eu.lever.co/*",
+        "https://jobs.ashbyhq.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Kairos Autofill" }
+}

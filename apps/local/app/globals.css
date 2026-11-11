@@ -1,0 +1,430 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (toggled on <html class="dark">). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #efece6;
+  --foreground: #1b1c1a;
+  --muted: #6c6f6a;
+  --border: #e4e1da;
+  --accent: #2f6f4f;
+  --accent-hover: #276043;
+  --accent-fg: #ffffff;
+  --ring: rgba(47, 111, 79, 0.28);
+
+  --success-bg: #e6f5ec;
+  --success-fg: #1c7a4b;
+  --warn-bg: #fbf1de;
+  --warn-fg: #8a5d13;
+  --danger-bg: #fcecea;
+  --danger-fg: #b3261e;
+  --info-bg: #e9f0fb;
+  --info-fg: #245ca6;
+
+  --shadow-sm: 0 1px 2px rgba(20, 20, 20, 0.04), 0 1px 3px rgba(20, 20, 20, 0.06);
+  --shadow-md: 0 4px 12px rgba(20, 20, 20, 0.08), 0 2px 4px rgba(20, 20, 20, 0.06);
+}
+
+.dark {
+  --background: #0e1110;
+  --surface: #171b19;
+  --surface-2: #1e2320;
+  --foreground: #e7e6e1;
+  --muted: #969b95;
+  --border: #2a302c;
+  --accent: #55a67d;
+  --accent-hover: #63b389;
+  --accent-fg: #08110c;
+  --ring: rgba(85, 166, 125, 0.35);
+
+  --success-bg: #12271d;
+  --success-fg: #74d9a3;
+  --warn-bg: #2a2412;
+  --warn-fg: #e3b768;
+  --danger-bg: #2d1715;
+  --danger-fg: #f2978f;
+  --info-bg: #14203a;
+  --info-fg: #95b8f2;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--ring);
+}
+
+/* ── Reusable components ──────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.field {
+  width: 100%;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.field::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.btn-secondary {
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--foreground);
+  background: var(--surface-2);
+}
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-success,
+.note-success {
+  background: var(--success-bg);
+  color: var(--success-fg);
+}
+.badge-warn,
+.note-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+.badge-danger,
+.note-danger {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+.badge-info,
+.note-info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+.badge-neutral {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.note {
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.875rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+/* ── Resume document (represents a printed page — always light "paper") ── */
+.paper {
+  background: #ffffff;
+  color: #111;
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-md);
+}
+.resume-doc {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #111;
+  line-height: 1.45;
+}
+.doc-h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+}
+.doc-h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #333;
+  border-bottom: 1px solid #ccc;
+  padding-bottom: 2px;
+  margin: 1.1rem 0 0.5rem;
+}
+.doc-h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0.75rem 0 0.1rem;
+}
+.doc-meta {
+  color: #666;
+  font-size: 0.8rem;
+  margin: 0 0 0.25rem;
+}
+.doc-p {
+  margin: 0.2rem 0;
+  font-size: 0.95rem;
+}
+.doc-bullet-dot {
+  color: #999;
+  line-height: 1.6;
+}
+.doc-bullet {
+  font-size: 0.95rem;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.doc-bullet:hover {
+  background: #fdf5e3;
+}
+
+/* On-screen tailored resume — mirrors the .docx layout (sans-serif, company-grouped). */
+.resume-doc {
+  font-family: Calibri, Arial, Helvetica, sans-serif;
+  color: #222;
+  font-size: 10.5pt;
+  line-height: 1.32;
+}
+.resume-doc .r-name {
+  font-size: 20pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin: 0 0 2px;
+}
+.resume-doc h1 + p {
+  color: #666;
+  font-size: 9pt;
+  margin: 0 0 10px;
+}
+.resume-doc h2 {
+  font-size: 11pt;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-bottom: 1px solid #bbb;
+  padding-bottom: 2px;
+  margin: 15px 0 6px;
+  font-weight: 700;
+}
+.resume-doc .r-co {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 1px;
+}
+.resume-doc .r-co > span:first-child {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.resume-doc .r-role {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 1px;
+}
+.resume-doc .r-role > span:first-child {
+  font-weight: 700;
+}
+.resume-doc .r-co > span:last-child,
+.resume-doc .r-role > span:last-child {
+  color: #666;
+  white-space: nowrap;
+}
+.resume-doc ul {
+  margin: 3px 0 0;
+  padding-left: 18px;
+}
+.resume-doc li {
+  margin: 2px 0;
+}
+.resume-doc p {
+  margin: 3px 0;
+}
+
+/* Knowledge-base body: provenance tags rendered as small colored markers. */
+.kb-body p,
+.kb-body li {
+  margin: 0.3rem 0;
+}
+.kb-body h2 {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 1rem 0 0.35rem;
+}
+.kb-body ul {
+  list-style: disc;
+  padding-left: 1.1rem;
+}
+.prov {
+  font-size: 0.62rem;
+  font-weight: 700;
+  vertical-align: super;
+  margin-left: 1px;
+  letter-spacing: 0;
+}
+.prov-R {
+  color: var(--success-fg);
+}
+.prov-C {
+  color: var(--info-fg);
+}
+.prov-F {
+  color: var(--warn-fg);
+}
+
+/* Print / export view (used by the STAR stories repository) */
+@media print {
+  @page {
+    size: landscape;
+    margin: 12mm;
+  }
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  .print-hide {
+    display: none !important;
+  }
+  .print-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .print-page .card {
+    border: none !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  .print-page table {
+    min-width: 0 !important;
+    font-size: 9pt !important;
+  }
+  .print-page tr {
+    break-inside: avoid;
+  }
+  .print-page thead {
+    display: table-header-group;
+  }
+  .print-page a {
+    color: #111 !important;
+    text-decoration: none !important;
+  }
+}
+
+/* ── Prep notes (markdown from an application folder) ── */
+.note-doc { line-height: 1.55; font-size: 0.95rem; }
+.note-doc h1 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.75rem; }
+.note-doc h2 { font-size: 1.1rem; font-weight: 650; margin: 2rem 0 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
+.note-doc h3 { font-size: 1rem; font-weight: 650; margin: 1.25rem 0 0.4rem; }
+.note-doc p { margin: 0.5rem 0; }
+.note-doc ul, .note-doc ol { margin: 0.4rem 0 0.6rem; padding-left: 1.4rem; }
+.note-doc ul { list-style: disc; }
+.note-doc ol { list-style: decimal; }
+.note-doc li { margin: 0.2rem 0; }
+.note-doc hr { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+.note-doc blockquote { margin: 0.5rem 0; padding: 0.4rem 0.8rem; border-left: 3px solid var(--info-fg); background: var(--info-bg); border-radius: 0 4px 4px 0; }
+.note-doc code { font-size: 0.85em; padding: 0 3px; border-radius: 3px; background: var(--border); }
+.note-doc pre { margin: 0.5rem 0; padding: 0.6rem 0.8rem; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; }
+.note-doc pre code { padding: 0; background: none; }
+.note-doc table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9rem; }
+.note-doc th, .note-doc td { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
+.note-doc a { text-decoration: underline; }
+.prov { display: inline-block; font-size: 0.7rem; font-weight: 700; line-height: 1; padding: 2px 5px; border-radius: 4px; vertical-align: 1px; }
+.prov-c { background: var(--success-bg); color: var(--success-fg); }
+.prov-q { background: var(--warn-bg); color: var(--warn-fg); }
+.prov-k { background: var(--info-bg); color: var(--info-fg); }
+.prov-rev { background: var(--border); color: var(--muted); }
+
+/* ── STAR stories, glance view (mirrors the interview glance cards) ── */
+.glance-story { border-radius: 8px; padding: 0.6rem 0.75rem; }
+.glance-ex { display: grid; gap: 0.25rem; margin: 0.4rem 0; }
+.glance-ex div { background: var(--info-bg); border-radius: 5px; padding: 0.2rem 0.5rem; font-size: 0.85rem; }
+.glance-steps { display: grid; gap: 0.4rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 0.4rem 0; }
+.glance-step { border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.85rem; line-height: 1.35; }
+.glance-step .gh { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.15rem; }
+.glance-step.final { border: 2px solid var(--success-fg); background: var(--success-bg); }
+.glance-step.final .gh { color: var(--success-fg); }
+.glance-say { font-size: 0.9rem; font-style: italic; border-left: 3px solid var(--success-fg); padding-left: 0.5rem; margin: 0.35rem 0; }
+.glance-notes { font-size: 0.8rem; color: var(--muted); display: grid; gap: 0.1rem; }
+.glance-story b { font-weight: 650; color: var(--foreground); }
+.recon { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--warn-bg); color: var(--warn-fg); }

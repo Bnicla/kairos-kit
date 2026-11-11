@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Blocking personal-data scan. Generic checks always run; the private
+      # term list comes from the repository secret KIT_SCAN_PATTERNS, so it is
+      # never published with the code.
+      - name: Personal-data scan
+        env:
+          KIT_SCAN_PATTERNS: ${{ secrets.KIT_SCAN_PATTERNS }}
+        run: node scripts/privacy-scan.mjs
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npx vitest run

@@ -1,0 +1,28 @@
+{
+  // Solution-style root: the real projects are packages/engine and apps/local.
+  // These options only let root tooling (vitest, editors) resolve the aliases.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowJs": true,
+    "jsx": "preserve",
+    "paths": {
+      "@/*": ["./apps/local/*"],
+      "@kairos/engine/*": ["./packages/engine/*"]
+    }
+  },
+  "references": [
+    { "path": "./packages/engine" },
+    { "path": "./apps/local" }
+  ],
+  "files": [],
+  "include": ["tests/**/*.ts"]
+}

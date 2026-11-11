@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0; width: 320px; background: #0b0f14; color: #e6edf3;
+      }
+      header { padding: 12px 14px; border-bottom: 1px solid #1f2937; }
+      h1 { font-size: 14px; margin: 0; }
+      .sub { color: #8b98a5; font-size: 11px; margin-top: 2px; }
+      .sub.ok { color: #4ade80; }
+      .sub.warn { color: #fbbf24; }
+      .body { padding: 12px 14px; }
+      .row { margin-bottom: 10px; }
+      label { display: block; font-size: 11px; color: #8b98a5; margin-bottom: 4px; }
+      select { width: 100%; padding: 6px; background: #111826; color: #e6edf3; border: 1px solid #2a3441; border-radius: 6px; }
+      button {
+        width: 100%; padding: 9px; border: 0; border-radius: 7px; font-weight: 600; cursor: pointer;
+        background: #16a34a; color: white; font-size: 13px;
+      }
+      button.secondary { background: #1f2937; color: #e6edf3; border: 1px solid #2a3441; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .status { margin-top: 10px; font-size: 12px; padding: 8px; border-radius: 6px; background: #111826; border: 1px solid #2a3441; white-space: pre-line; }
+      .ok { color: #4ade80; } .warn { color: #fbbf24; } .err { color: #f87171; }
+      .note { margin-top: 10px; font-size: 11px; color: #8b98a5; }
+      .offer { margin-top: 8px; padding: 8px; border: 1px dashed #2a3441; border-radius: 6px; background: #0f1621; }
+      .offer .t { font-size: 12px; margin-bottom: 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Kairos Autofill</h1>
+      <div class="sub" id="detect">Checking page…</div>
+    </header>
+    <div class="body">
+      <div class="row">
+        <label>Résumé to attach <span id="matchTag" class="ok"></span></label>
+        <select id="resume"><option value="">Loading…</option></select>
+      </div>
+
+      <div class="offer" id="offer" style="display:none">
+        <div class="t" id="offerText">No résumé tailored for this role yet.</div>
+        <button class="secondary" id="generate">Generate a résumé for this role</button>
+      </div>
+
+      <button id="fill" disabled>Fill this application</button>
+      <div class="status" id="status" style="display:none"></div>
+
+      <div class="offer" id="tokenBox" style="display:none">
+        <div class="t">Connect to Kairos: paste the token from<br /><code>~/Kairos/.secrets/autofill-token</code></div>
+        <input id="token" type="password" placeholder="token" style="width:100%;padding:6px;background:#111826;color:#e6edf3;border:1px solid #2a3441;border-radius:6px;box-sizing:border-box;margin-bottom:6px" />
+        <button class="secondary" id="saveToken">Save token</button>
+      </div>
+
+      <div class="note">Fills from your Kairos knowledge base. Review everything, then submit yourself — this never clicks submit.</div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

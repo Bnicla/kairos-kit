@@ -1,0 +1,26 @@
+{
+  "name": "kairos-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kairos Kit: a local career-operations system on Claude Code (record with sources, scoring, tailored résumés, board, daily job search).",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm -w kairos-local run dev",
+    "build": "npm -w kairos-local run build",
+    "start": "npm -w kairos-local run start",
+    "mcp": "npm -w kairos-local run mcp",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p packages/engine && tsc --noEmit -p apps/local",
+    "scan": "node scripts/privacy-scan.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
+  },
+  "license": "MIT"
+}

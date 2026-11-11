@@ -1,0 +1,37 @@
+{
+  "name": "kairos-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kairos local app: MCP server (Claude Code driver), dashboard over your data folder, and the daily job-search scripts.",
+  "scripts": {
+    "dev": "KAIROS_LOCAL_ONLY=1 next dev -H 127.0.0.1",
+    "build": "next build",
+    "start": "KAIROS_LOCAL_ONLY=1 next start -H 127.0.0.1",
+    "mcp": "tsx mcp/server.ts",
+    "sourcing-run": "tsx scripts/sourcing-run.mts",
+    "prune-closed": "tsx scripts/prune-closed-listings.mts",
+    "harvest-registry": "tsx scripts/harvest-registry.mts",
+    "backlog-merge": "tsx scripts/backlog-merge.mts",
+    "dream-watch": "tsx scripts/dream-watch.mts",
+    "fetch-forms": "tsx scripts/fetch-forms.mts",
+    "board-cleanup": "tsx scripts/board-cleanup.mts",
+    "tailor-resume": "tsx scripts/tailor-resume.mts"
+  },
+  "dependencies": {
+    "@kairos/engine": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sparticuz/chromium": "^149.0.0",
+    "next": "15.5.29",
+    "puppeteer-core": "^25.3.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "unpdf": "^1.6.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.13"
+  }
+}

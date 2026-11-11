@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kairos": {
+      "command": "npx",
+      "args": ["tsx", "apps/local/mcp/server.ts"]
+    }
+  }
+}
