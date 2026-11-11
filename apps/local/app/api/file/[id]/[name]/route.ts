@@ -7,7 +7,7 @@ import { submissionFileName } from "@kairos/engine/file-names";
  * never an arbitrary path — so the dashboard can serve the generated resume,
  * cover letter, or the actually-submitted file for download.
  */
-const ALLOWED = /^(resume\.docx|resume\.pdf|cover-letter\.docx|cover-letter\.pdf|submitted-resume\.[a-z0-9]+)$/;
+const ALLOWED = /^(resume\.docx|resume\.pdf|cover-letter\.docx|cover-letter\.pdf|submitted-resume\.(pdf|docx))$/;
 
 const MIME: Record<string, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

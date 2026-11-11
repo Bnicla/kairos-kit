@@ -4,7 +4,12 @@
 // which the Kairos /api/autofill-profile route allows. All localhost access is
 // funneled through here.
 
-const KAIROS_BASE = "http://localhost:3000";
+// The dashboard's address: port 3000 unless the popup's settings name another (KAIROS_PORT).
+async function kairosBase() {
+  const { kairosPort } = await chrome.storage.local.get("kairosPort");
+  const port = /^\d{4,5}$/.test(String(kairosPort ?? "")) ? kairosPort : "3000";
+  return `http://localhost:${port}`;
+}
 
 // Shared-secret auth: the server generates ~/Kairos/.secrets/autofill-token;
 // the user pastes it once into the popup's settings and every request carries
@@ -15,7 +20,7 @@ async function authHeaders() {
 }
 
 async function getProfile() {
-  const res = await fetch(`${KAIROS_BASE}/api/autofill-profile`, {
+  const res = await fetch(`${await kairosBase()}/api/autofill-profile`, {
     cache: "no-store",
     headers: await authHeaders(),
   });
@@ -29,10 +34,10 @@ async function getProfile() {
 // a worker to a content script).
 async function getFileBase64(path) {
   const headers = await authHeaders();
-  let res = await fetch(`${KAIROS_BASE}${path}`, { cache: "no-store", headers });
+  let res = await fetch(`${await kairosBase()}${path}`, { cache: "no-store", headers });
   // If the PDF hasn't been rendered for this app, fall back to the .docx.
   if (!res.ok && path.endsWith(".pdf")) {
-    res = await fetch(`${KAIROS_BASE}${path.replace(/\.pdf$/, ".docx")}`, { cache: "no-store", headers });
+    res = await fetch(`${await kairosBase()}${path.replace(/\.pdf$/, ".docx")}`, { cache: "no-store", headers });
   }
   if (!res.ok) throw new Error(`file ${res.status}`);
   const buf = await res.arrayBuffer();
@@ -51,7 +56,7 @@ async function getFileBase64(path) {
 // Ask the local Kairos server to map scraped form fields to profile values via
 // Claude. The server assembles the profile itself, so we send only the fields.
 async function mapFields(fields) {
-  const res = await fetch(`${KAIROS_BASE}/api/autofill-map`, {
+  const res = await fetch(`${await kairosBase()}/api/autofill-map`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     cache: "no-store",

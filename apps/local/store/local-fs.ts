@@ -72,12 +72,18 @@ function mimeFor(name: string): string {
 }
 
 /**
- * Never write through a symbolic link: a link placed in the data folder could
- * point a save at a file outside it.
+ * Never write through a symbolic link: a link placed in the data folder, as
+ * the file itself or as a folder above it, could point a save at a file
+ * outside it. Checked just before the write; another program running as the
+ * user at the same moment is outside what this guards against (SECURITY.md).
  */
-async function refuseLink(abs: string) {
+async function refuseLink(root: string, abs: string) {
   const st = await fs.lstat(abs).catch(() => null);
   if (st?.isSymbolicLink()) throw new Error(`Not saved: ${path.basename(abs)} is a symbolic link in the data folder. Replace it with a regular file.`);
+  const [realRoot, realDir] = await Promise.all([fs.realpath(root), fs.realpath(path.dirname(abs))]);
+  if (realDir !== realRoot && !realDir.startsWith(realRoot + path.sep)) {
+    throw new Error(`Not saved: the folder of ${path.basename(abs)} leads outside the data folder (a symbolic link). Replace it with a regular folder.`);
+  }
 }
 
 export class LocalStore implements Store {
@@ -138,7 +144,7 @@ export class LocalStore implements Store {
   async writeFile(filePath: string[], content: string): Promise<string> {
     const abs = this.abs(filePath);
     await fs.mkdir(path.dirname(abs), { recursive: true });
-    await refuseLink(abs);
+    await refuseLink(this.root, abs);
     await fs.writeFile(abs, content, "utf8");
     return abs;
   }
@@ -146,7 +152,7 @@ export class LocalStore implements Store {
   async writeBinary(filePath: string[], buffer: Buffer, _mimeType?: string): Promise<string> {
     const abs = this.abs(filePath);
     await fs.mkdir(path.dirname(abs), { recursive: true });
-    await refuseLink(abs);
+    await refuseLink(this.root, abs);
     await fs.writeFile(abs, buffer);
     return abs;
   }

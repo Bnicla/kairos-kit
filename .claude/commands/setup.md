@@ -44,18 +44,21 @@ when asked." Then stop.
    Ask once for approval of the whole list; apply only what they approve.
 5. **Re-runs never overwrite silently.** New files: `save_experience` /
    `save_education` with `expect_new: true`. An existing file is re-saved only
-   after the student approved the change: `read_experience` first, change only
+   after the student approved the change: `read_experience` with
+   `for_editing: true` first, change only
    the approved parts, keep everything else, then save with the merged
    `sources`. `unchanged` items are not saved again.
 6. After saving experiences, call `rebuild_index`.
-7. **Each save to the record shows a Claude Code confirmation.** Before the
-   first one, tell the student: "Each time I save something to your record,
-   Claude Code shows you exactly what would be saved. Accept only what is
-   true." A declined save is not retried unless they ask.
-7. At the end of each section call `mark_setup_section` with `done`, or with
+7. **Each save, and each document read, shows a Claude Code confirmation.**
+   Before the first one, tell the student: "Before I read one of your files, and
+   each time I save something to your record, Claude Code shows you the file or
+   the full change. Accept only what is right." A declined save or read is not
+   retried unless they ask. A role too long for one confirmation is saved in
+   two parts.
+8. At the end of each section call `mark_setup_section` with `done`, or with
    `skipped` when the student chose to skip it. Skipped settings keep their
    stated defaults (`setup_status` shows them under `unset`).
-8. Search settings: every `save_search_profile` call passes
+9. Search settings: every `save_search_profile` call passes
    `source: "confirmed"` and only the fields that changed (the save merges).
 
 ## Step 0: the data folder and the install
@@ -150,7 +153,8 @@ PARTIAL when one side is missing; OPEN when they are not sure. Explain once:
 ### 4. Skills (`skills`)
 Show the skills found, grouped by role. Ask which are wrong, and which are
 missing. Every added skill must be tied to a role where they used it: re-save
-that role with the skill (`prov: "C"`) after `read_experience`, or add a
+that role with the skill (`prov: "C"`) after `read_experience` with
+`for_editing: true`, or add a
 "Skills note" with `save_confirmed_fact`.
 
 ### 5. Goals and target titles (`goals`)

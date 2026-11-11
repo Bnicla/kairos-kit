@@ -18,10 +18,13 @@ well:
   interview prep;
 - nine slash commands (`/setup`, `/find`, `/score`, `/tailor`, `/letter`,
   `/prep`, `/apply`, `/status`, `/update`);
-- code checks that every generated résumé must pass before it is saved.
+- code checks that every generated résumé, and every number in a cover letter,
+  must pass before it is saved.
 
-Your data stays on your machine, in a data folder outside this repository
-(`~/Kairos` by default). The kit's code never sends it anywhere.
+Your data is stored on your machine, in a data folder outside this repository
+(`~/Kairos` by default). There is no Kairos server: the parts a task needs go
+to Anthropic through Claude Code, under your own Claude plan (see "What is sent
+to AI" below), and nowhere else.
 
 ## How it works
 
@@ -38,8 +41,8 @@ Each one is written up in `docs/adr`, with the context and the costs accepted.
 |---|---|
 | [0001](docs/adr/0001-hand-rolled-agent-loop.md) | A plain tool-use loop, no agent framework. |
 | [0002](docs/adr/0002-deterministic-gates-not-llm-judges.md) | The checks that decide whether a document is saved are code, not a model's judgment. A number in a résumé must appear word for word in the source it claims. |
-| [0003](docs/adr/0003-attribution-guard-not-sanitization.md) | Against prompt injection from job postings, only the user can put a fact into the record. In the kit, every save to the record shows the user exactly what would be saved, in a Claude Code confirmation the model cannot answer; nothing is saved without their Accept. |
-| [0004](docs/adr/0004-provenance-memory-model.md) | Memory is readable Markdown where every fact is tagged with its source, not a vector store. Unverified facts are removed in code before any evidence reaches a model. |
+| [0003](docs/adr/0003-attribution-guard-not-sanitization.md) | Against prompt injection from job postings, only the user can put a fact into the record. In the kit, every save of personal data (the record, form answers, application answers, stories, search settings) and every document read shows the user the full change, removals included, in a Claude Code confirmation the model cannot answer; nothing is saved or read without their Accept. |
+| [0004](docs/adr/0004-provenance-memory-model.md) | Memory is readable Markdown where every fact is tagged with its source, not a vector store. Unverified facts are removed in code before evidence reaches a model; only the edit view of a role file keeps them, marked. |
 | [0005](docs/adr/0005-model-routing-and-cost.md) | One registry decides which model each task uses; tasks where quality decides the outcome use the strongest model. |
 | [0006](docs/adr/0006-structured-outputs-via-prompt-and-retry.md) | Structured output by JSON in the prompt, schema validation, and one retry with the errors fed back. |
 
@@ -49,12 +52,12 @@ amendment (0003).
 
 ## Try it with the demo record (about ten minutes)
 
-You need a Mac (macOS 14 or newer), Node.js 22 or newer
+You need a Mac (macOS 14 or newer), Node.js 22.17 or newer, or 24 or newer
 (`brew install node@22`), and Claude Code signed in with a Claude Pro or Max
 plan.
 
 ```bash
-git clone <this repository's address> ~/kairos-kit
+git clone https://github.com/Bnicla/kairos-kit.git ~/kairos-kit
 cd ~/kairos-kit
 ./install.sh --home ~/Kairos-demo --demo --no-dashboard --no-daily
 claude

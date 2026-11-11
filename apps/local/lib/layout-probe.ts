@@ -7,7 +7,8 @@ import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AtsExpect } from "@kairos/engine/ats-text";
-import { checkPdfAts, pdftotextPath, type AtsCheck } from "./pdf-render";
+import { checkPdfAts, pdftotextPath, sofficePath, type AtsCheck } from "./pdf-render";
+import { existsSync } from "node:fs";
 
 /**
  * Visual layout probe: render a .docx to PDF and MEASURE the real page count
@@ -22,8 +23,8 @@ import { checkPdfAts, pdftotextPath, type AtsCheck } from "./pdf-render";
  */
 
 const execFileAsync = promisify(execFile);
-const SOFFICE = process.env.SOFFICE_PATH ?? "/opt/homebrew/bin/soffice";
-const PDFINFO = "/opt/homebrew/bin/pdfinfo";
+const SOFFICE = sofficePath();
+const PDFINFO = ["/opt/homebrew/bin/pdfinfo", "/usr/local/bin/pdfinfo"].find((p) => existsSync(p)) ?? "/opt/homebrew/bin/pdfinfo";
 // Isolated LibreOffice profile so the probe never pops a visible window and
 // never collides with the user's own LibreOffice session.
 const LO_PROFILE = "file:///tmp/lo-kairos-probe";

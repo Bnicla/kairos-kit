@@ -47,12 +47,13 @@ import {
   loadSearchProfile,
   saveSearchProfile,
   updateSearchProfile,
+  mergeSearchProfile,
   type CandidateProfileFrontmatter,
 } from "@kairos/engine/sourcing/search-profile";
 import { searchQA, upsertQA, readQA, loadQAIndex } from "@kairos/engine/qabank";
 import { INSIGHTS_SYSTEM_PROMPT, buildInsightsUserMessage } from "@kairos/engine/prompts/insights";
 import { ENRICHMENT_SYSTEM_PROMPT, buildEnrichmentUserMessage } from "@kairos/engine/prompts/enrichment";
-import { serializeExperience, insertUnderSection } from "@kairos/engine/kb/experience";
+import { serializeExperience, insertUnderSection, stripUnverified } from "@kairos/engine/kb/experience";
 import { computeHealth } from "@kairos/engine/health";
 import {
   SCORING_SYSTEM_PROMPT,
@@ -81,7 +82,7 @@ import { SETUP_SECTIONS, sectionByName } from "@kairos/engine/setup/sections";
 import { SETUP_STATE_PATH, emptySetupState, setupStatus, type SetupState } from "@kairos/engine/setup/status";
 import { reconcileSources, type RecordOnFile } from "@kairos/engine/setup/reconcile";
 import { htmlToPdf } from "@/lib/pdf";
-import { askToSave, changedFields, clip, newLines, type Confirmer } from "@/lib/record-confirm";
+import { askToSave, changedFields, clip, diffPreview, jsonDiff, newLines, removedLines, type Confirmer } from "@/lib/record-confirm";
 import type { GeneratedResume } from "@kairos/engine/types";
 import type { ScoreReport } from "@kairos/engine/types";
 
@@ -201,14 +202,18 @@ server.registerTool(
   {
     title: "Read one knowledge-base experience",
     description:
-      "The full markdown (frontmatter + body, provenance tags intact) of a single experience file. Use after list_experiences when you need the detail.",
-    inputSchema: { fileName: z.string().describe("e.g. 02-northwind-search-platform.md") },
+      "One experience file (frontmatter + body, provenance tags intact). By default unverified [?] facts are removed, like every evidence tool: use what it returns as facts. Pass for_editing: true only to re-save the file (setup re-runs, adding a skill): it then returns the whole file, [?] lines included, which must be kept as they are and never used as facts.",
+    inputSchema: {
+      fileName: z.string().describe("e.g. 02-northwind-search-platform.md"),
+      for_editing: z.boolean().optional().describe("true: the whole file, unverified lines included, to change and re-save it"),
+    },
   },
-  guard(async ({ fileName }) => {
+  guard(async ({ fileName, for_editing }) => {
     const experiences = await loadExperiences(store);
     const exp = experiences.find((e) => e.fileName === fileName || e.fileName === `${fileName}.md`);
     if (!exp) return fail(`Experience not found: ${fileName}`);
-    return ok({ fileName: exp.fileName, markdown: serializeExperience(exp) });
+    if (for_editing) return ok({ fileName: exp.fileName, markdown: serializeExperience(exp), note: "Whole file for editing: keep the [?] lines as they are and never use them as facts." });
+    return ok({ fileName: exp.fileName, markdown: serializeExperience(stripUnverified(exp)), unverified_removed: true });
   }),
 );
 
@@ -271,7 +276,7 @@ server.registerTool(
         title: e.frontmatter.title,
         dates: `${e.frontmatter.start} – ${e.frontmatter.end}`,
         domains: e.frontmatter.domains ?? [],
-        top_skills: (e.frontmatter.skills ?? []).slice(0, 5).map((s) => s.name),
+        top_skills: (e.frontmatter.skills ?? []).filter((s) => s.prov !== "?").slice(0, 5).map((s) => s.name),
       })),
       voice_summary: voice ? voice.slice(0, 700) : null,
       insights: insights ?? null,
@@ -310,7 +315,7 @@ server.registerTool(
   {
     title: "Save an application answer",
     description:
-      "Persist an answer to an application's question: appends to the application's questions.json AND upserts the Q&A bank for reuse on future applications.",
+      "Persist an answer to an application's question: appends to the application's questions.json AND upserts the Q&A bank for reuse on future applications. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: {
       appId: z.string(),
       question: z.string(),
@@ -324,6 +329,13 @@ server.registerTool(
     const path = ["applications", appId, "questions.json"];
     const existing = (await store.readJson<{ question: string; answer: string }[]>(path)) ?? [];
     const i = existing.findIndex((q) => q.question === question);
+    const refused = await askToSave(
+      confirmer,
+      `save an answer for ${meta.company ?? appId}, and keep it in your answer bank for later forms`,
+      [`Question: ${question}`, "", ...diffPreview(newLines(existing[i]?.answer, answer), removedLines(existing[i]?.answer, answer))],
+      "saves this answer",
+    );
+    if (refused) return fail(refused);
     if (i === -1) existing.push({ question, answer });
     else existing[i] = { question, answer };
     await store.writeJson(path, existing);
@@ -381,7 +393,7 @@ server.registerTool(
   {
     title: "Prepare document extraction",
     description:
-      "Read one source document (résumé PDF/DOCX/TXT/MD, a LinkedIn data export .zip or its unzipped folder, or a transcript) and return the extraction system prompt + user message. YOU then produce the ExtractionResult JSON. Before saving anything, pass every extraction to reconcile_sources; then persist with save_experience / save_education / save_voice_profile / save_profile, naming the document in `sources`. The document is logged in setup-state.json.",
+      "Read one source document (résumé PDF/DOCX/TXT/MD, a LinkedIn data export .zip or its unzipped folder, or a transcript) and return the extraction system prompt + user message. YOU then produce the ExtractionResult JSON. Before saving anything, pass every extraction to reconcile_sources; then persist with save_experience / save_education / save_voice_profile / save_profile, naming the document in `sources`. The document is logged in setup-state.json. Claude Code asks the user to approve the exact file first; if they decline, nothing is read.",
     inputSchema: {
       path: z.string().optional().describe("Absolute path to the document (any supported type)"),
       pdf_path: z.string().optional().describe("Older name for path"),
@@ -390,8 +402,18 @@ server.registerTool(
   guard(async ({ path: p, pdf_path }) => {
     const target = p ?? pdf_path;
     if (!target) return fail("Pass the document's absolute path.");
-    const { readSourceDocument } = await import("@/lib/source-docs");
-    const doc = await readSourceDocument(target);
+    const { checkSourcePath, readSourceDocument } = await import("@/lib/source-docs");
+    // The path comes from the model: the user approves the exact file before it is read.
+    const { real, stat } = await checkSourcePath(target);
+    const refused = await askToSave(
+      confirmer,
+      `read this ${stat.isDirectory() ? "folder (a LinkedIn export)" : "document"} into the conversation`,
+      [real, ...(real !== target ? [`(asked for as ${target})`] : [])],
+      "reads it",
+      "Decline if you did not give Kairos this file.",
+    );
+    if (refused) return fail(refused.replace("Nothing was saved", "Nothing was read"));
+    const doc = await readSourceDocument(real);
     if (!doc.text || doc.text.trim().length < 100) {
       return fail(`${doc.name} had almost no extractable text (it may be a scanned image). Ask for a text-based copy, or paste the text.`);
     }
@@ -517,8 +539,8 @@ server.registerTool(
     const role = [fm.title, fm.company].filter(Boolean).join(" at ") || fileName;
     const refused = await askToSave(
       confirmer,
-      `${existing ? "update" : "add"} the role ${role} (${fileName})${existing ? "; new or changed lines only" : ""}`,
-      clip([...changedFields(before?.data, fm, ["sources"]), ...newLines(before?.content, body)]),
+      `${existing ? "update" : "add"} the role ${role} (${fileName})`,
+      diffPreview([...changedFields(before?.data, fm, ["sources"]), ...newLines(before?.content, body)], removedLines(before?.content, body)),
     );
     if (refused) return fail(refused);
     const prior = existing ? (before!.data.sources as unknown) : undefined;
@@ -557,8 +579,8 @@ server.registerTool(
     const before = existing ? matter(existing) : null;
     const refused = await askToSave(
       confirmer,
-      `${existing ? "update" : "add"} the education entry ${fileName}${existing ? "; new or changed lines only" : ""}`,
-      clip([...changedFields(before?.data, fm, ["sources"]), ...newLines(before?.content, body)]),
+      `${existing ? "update" : "add"} the education entry ${fileName}`,
+      diffPreview([...changedFields(before?.data, fm, ["sources"]), ...newLines(before?.content, body)], removedLines(before?.content, body)),
     );
     if (refused) return fail(refused);
     const merged = mergeSources(before?.data.sources, fm.sources, sources);
@@ -572,10 +594,13 @@ server.registerTool(
   "save_voice_profile",
   {
     title: "Save the voice profile",
-    description: "Persist the learned writing-style profile (markdown).",
+    description: "Persist the learned writing-style profile (markdown). Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: { markdown: z.string() },
   },
   guard(async ({ markdown }) => {
+    const was = await store.readFile(["knowledge-base", "_voice-profile.md"]);
+    const refused = await askToSave(confirmer, "save how you write (your voice profile)", diffPreview(newLines(was, markdown), removedLines(was, markdown)), "saves it");
+    if (refused) return fail(refused);
     await saveVoiceProfile(store, markdown);
     return ok({ ok: true, saved: "knowledge-base/_voice-profile.md" });
   }),
@@ -586,7 +611,7 @@ server.registerTool(
   {
     title: "Save the user's own writing samples",
     description:
-      "Store samples of the user's OWN writing (a letter, an email, a post they wrote themselves) in knowledge-base/_writing-samples.md. The cover-letter engine uses them as style few-shots: register and sentence shapes, never content. Paste the text verbatim; list what to imitate and which generic parts never to imitate. Appends by default; mode 'replace' rewrites the file.",
+      "Store samples of the user's OWN writing (a letter, an email, a post they wrote themselves) in knowledge-base/_writing-samples.md. The cover-letter engine uses them as style few-shots: register and sentence shapes, never content. Paste the text verbatim; list what to imitate and which generic parts never to imitate. Appends by default; mode 'replace' rewrites the file. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: {
       samples: z
         .array(
@@ -604,7 +629,10 @@ server.registerTool(
   guard(async ({ samples, mode }) => {
     const { writeWritingSamples } = await import("@/lib/kb-files");
     const path = ["knowledge-base", "_writing-samples.md"];
-    const md = writeWritingSamples(await store.readFile(path), samples, mode ?? "append");
+    const was = await store.readFile(path);
+    const md = writeWritingSamples(was, samples, mode ?? "append");
+    const refused = await askToSave(confirmer, "save writing samples (used for your style only, never as facts)", diffPreview(newLines(was, md), removedLines(was, md)), "saves them");
+    if (refused) return fail(refused);
     await store.writeFile(path, md);
     return ok({ ok: true, saved: "knowledge-base/_writing-samples.md", samples: (md.match(/^## Sample \d+/gm) ?? []).length });
   }),
@@ -642,7 +670,7 @@ server.registerTool(
   {
     title: "Save a STAR interview story",
     description:
-      "Insert or replace one behavioral-interview story in knowledge-base/star-stories.json (shown on the dashboard Stories page). Matched by story title within its theme; a new theme is created. Every fact must come from the knowledge base (name the source file); numbers should match the metrics register.",
+      "Insert or replace one behavioral-interview story in knowledge-base/star-stories.json (shown on the dashboard Stories page). Matched by story title within its theme; a new theme is created. Every fact must come from the knowledge base (name the source file); numbers should match the metrics register. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: {
       theme: z.string().describe("Theme, e.g. 'Ownership', 'Conflict & Disagreement', 'Failure & Learning'"),
       story: starStorySchema,
@@ -651,7 +679,10 @@ server.registerTool(
   guard(async ({ theme, story }) => {
     const { upsertStarStory } = await import("@/lib/kb-files");
     const path = ["knowledge-base", "star-stories.json"];
-    const { data, replaced } = upsertStarStory(await store.readJson(path), theme, story as never);
+    const was = await store.readJson(path);
+    const { data, replaced } = upsertStarStory(was as never, theme, story as never);
+    const refused = await askToSave(confirmer, `${replaced ? "change" : "save"} the interview story "${story.story}" (${theme})`, jsonDiff(was, data), "saves it");
+    if (refused) return fail(refused);
     await store.writeJson(path, data);
     return ok({ ok: true, saved: "knowledge-base/star-stories.json", theme, story: story.story, replaced });
   }),
@@ -673,14 +704,15 @@ server.registerTool(
   },
   guard(async (m) => {
     const { upsertMetricEntry } = await import("@/lib/kb-files");
+    const path = ["knowledge-base", "metrics-register.md"];
+    const was = await store.readFile(path);
+    const { markdown, replaced } = upsertMetricEntry(was, m);
     const refused = await askToSave(
       confirmer,
-      `save a number in your metrics register, under "${m.section}"`,
-      clip([`${m.name}: ${m.status}${m.status_note ? ` (${m.status_note})` : ""}`, ...(m.details ?? [])]),
+      `${replaced ? "change" : "save"} a number in your metrics register, under "${m.section}"`,
+      diffPreview(newLines(was, markdown), removedLines(was, markdown)),
     );
     if (refused) return fail(refused);
-    const path = ["knowledge-base", "metrics-register.md"];
-    const { markdown, replaced } = upsertMetricEntry(await store.readFile(path), m);
     await store.writeFile(path, markdown);
     return ok({ ok: true, saved: "knowledge-base/metrics-register.md", section: m.section, name: m.name, status: m.status, replaced });
   }),
@@ -1045,13 +1077,15 @@ server.registerTool(
   {
     title: "Save application-form answers",
     description:
-      "Write autofill.json, the answers the browser extension fills into application forms: contact, links, address, work_authorization, common_answers, and EEO answers (served only when share_eeo is true; ask, never guess, and say they are optional). Merges key by key by default; mode 'replace' rewrites the file.",
+      "Write autofill.json, the answers the browser extension fills into application forms: contact, links, address, work_authorization, common_answers, and EEO answers (served only when share_eeo is true; ask, never guess, and say they are optional). Merges key by key by default; mode 'replace' rewrites the file. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: saveAutofillShape,
   },
   guard(async ({ mode, ...fields }) => {
     const { mergeAutofill } = await import("@/lib/autofill");
     const existing = (await store.readJson<Record<string, unknown>>(["autofill.json"])) ?? null;
     const next = mergeAutofill(mode === "replace" ? null : existing, clean(fields) as Record<string, unknown>);
+    const refused = await askToSave(confirmer, "save answers for application forms (autofill.json)", jsonDiff(existing, next), "saves them");
+    if (refused) return fail(refused);
     await store.writeJson(["autofill.json"], next);
     return ok({ ok: true, saved: "autofill.json", sections: Object.keys(next) });
   }),
@@ -1085,10 +1119,14 @@ server.registerTool(
   {
     title: "Save the sourcing search profile",
     description:
-      "Persist the user's sourcing preferences after they confirm changes in conversation. The update is MERGED into the stored profile: fields you pass replace the stored ones, fields you omit are kept (pass an empty array to clear a list). Set source to 'confirmed' once the user has engaged with the preferences. Never save invented preferences.",
+      "Persist the user's sourcing preferences after they confirm changes in conversation. The update is MERGED into the stored profile: fields you pass replace the stored ones, fields you omit are kept (pass an empty array to clear a list). Set source to 'confirmed' once the user has engaged with the preferences. Never save invented preferences. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: saveSearchProfileShape,
   },
   guard(async (fields) => {
+    const was = await loadSearchProfile(store);
+    const next = mergeSearchProfile(was, fields);
+    const refused = await askToSave(confirmer, "change what the job search looks for", jsonDiff(was, next, ["updated_at", "derived_at", "confirmed_at"]), "saves it");
+    if (refused) return fail(refused);
     const profile = await updateSearchProfile(store, fields);
     return ok({ ok: true, saved: "sourcing/search-profile.json", description: describeSearchProfile(profile) });
   }),
@@ -1444,7 +1482,7 @@ server.registerTool(
   {
     title: "Save a cover letter",
     description:
-      "Persist the cover letter (markdown) you wrote. Runs the anti-slop prose gate first: hard violations (attention hooks, reveal set-ups, mic-drop one-liners, stock closers, banned words, em dashes) reject the save with the exact phrases to fix; soft ones come back as warnings. Writes cover-letter.md and a business-letter cover-letter.docx (+ .pdf).",
+      "Persist the cover letter (markdown) you wrote. Runs the anti-slop prose gate first: hard violations (attention hooks, reveal set-ups, mic-drop one-liners, stock closers, banned words, em dashes) reject the save with the exact phrases to fix; soft ones come back as warnings. Every number in the letter must appear in the verified record, the profile, education or the posting, or the save is rejected naming it. Writes cover-letter.md and a business-letter cover-letter.docx (+ .pdf).",
     inputSchema: { appId: z.string(), markdown: z.string() },
   },
   guard(async ({ appId, markdown }) => {
@@ -1457,6 +1495,16 @@ server.registerTool(
       return fail(
         `Prose gate rejected the letter (${hard.length} hard violation(s)). Rewrite these and save again:\n` +
           hard.map((v) => `- ${v.rule}: ${v.detail}`).join("\n"),
+      );
+    }
+    // Numbers: each must come from the verified record, the profile, education or the posting.
+    const { ungroundedNumbers } = await import("@kairos/engine/tools/checks");
+    const [exps, edu, profileRaw] = await Promise.all([loadExperiences(store), loadEducation(store).catch(() => []), store.readFile(["profile.md"])]);
+    const sources = [profileRaw ?? "", JSON.stringify(edu), snapshotText(await readSnapshot(store, appId)) ?? ""].join("\n");
+    const unknown = ungroundedNumbers(markdown, exps, sources);
+    if (unknown.length) {
+      return fail(
+        `Not saved: ${unknown.length} number(s) in the letter are not in the user's verified record, profile, education or the posting: ${unknown.join(", ")}. Remove them, or ask the user and record the fact first (save_confirmed_fact / save_metric).`,
       );
     }
     const warnings = violations.map((v) => `${v.rule}: ${v.detail}`);

@@ -36,7 +36,13 @@ These are known and accepted for a single-user tool on the user's own Mac.
   confirmations automatically. The confirmations need a Claude Code version
   that supports MCP elicitation; without it, nothing is saved.
 - **Other programs running as the user** can read the data folder and the token
-  files. The kit does not defend against software already on the computer.
+  files, and change it between the kit's checks and its writes. The kit does
+  not defend against software already on the computer.
+- **A job site's page can read what is filled** into its form before you
+  submit. The fill uses only values from your profile, but a hostile site
+  could still read them. Fill forms only on job sites you trust.
+- **Cover letters** are checked for made-up numbers, not for every claim. Read
+  each letter before you use it.
 - **Link checks resolve the name once.** A host whose address changes between
   the check and the request is not caught.
 - **Dependencies.** The kit takes npm's non-breaking security fixes on every

@@ -107,8 +107,9 @@ else
 [ "$(uname)" = "Darwin" ] || warn "This installer is written for macOS. Packages and the data folder will work elsewhere; the services will not."
 
 command -v node >/dev/null || fail "Node.js not found. Install Node 22 (https://nodejs.org or 'brew install node@22') and re-run."
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 22 ] || fail "Node $NODE_MAJOR found; Kairos Kit needs Node 22 or newer."
+# 22.17 or newer within 22, or 24 and later (what the PDF renderer's Chromium package supports; 23 is not).
+NODE_OK="$(node -p 'const [a,b]=process.versions.node.split(".").map(Number); (a===22&&b>=17)||a>=24')"
+[ "$NODE_OK" = "true" ] || fail "Node $(node -v) found; Kairos Kit needs Node 22.17 or newer, or Node 24 or newer (brew install node@22)."
 ok "Node $(node -v)"
 NODE_DIR="$(dirname "$(command -v node)")"
 

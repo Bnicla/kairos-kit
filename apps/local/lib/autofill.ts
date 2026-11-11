@@ -361,12 +361,44 @@ export function extractMappingArray(text: string): FieldMapping[] {
  * choice fields only values copied VERBATIM from that field's options — a
  * hallucinated option must never be clicked into a form.
  */
-export function filterSafeMappings(fields: MapField[], mappings: FieldMapping[]): FieldMapping[] {
+/** Every string in the profile, normalized (lower case, single spaces), for checking a mapped value. */
+export function profileStrings(profile: unknown): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown) => {
+    if (v === null || v === undefined) return;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out.push(norm(String(v)));
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (typeof v === "object") Object.values(v as Record<string, unknown>).forEach(walk);
+  };
+  walk(profile);
+  return out.filter(Boolean);
+}
+const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Keep only mappings the code can vouch for. A choice field's value must be
+ * one of its options, verbatim. A text field's value must come from the
+ * profile: one of its values, part of one (a first name from the full name),
+ * or two of them joined (a city and a state). A value the model made up, or
+ * that a form's label talked it into, is dropped.
+ */
+export function filterSafeMappings(fields: MapField[], mappings: FieldMapping[], profile?: unknown): FieldMapping[] {
   const byId = new Map(fields.map((f) => [f.id, f]));
+  const leaves = profile === undefined ? null : profileStrings(profile);
+  const fromProfile = (value: string) => {
+    if (!leaves) return true;
+    const v = norm(value);
+    if (!v) return false;
+    if (leaves.includes(v)) return true;
+    const word = new RegExp(`(^|[^a-z0-9])${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`);
+    if (v.length >= 2 && leaves.some((l) => word.test(l))) return true;
+    for (const a of leaves) if (v.startsWith(a)) for (const b of leaves) if (v === `${a} ${b}` || v === `${a}, ${b}`) return true;
+    return false;
+  };
   return mappings.filter((m) => {
     const f = byId.get(m.id);
     if (!f) return false;
     if (f.options && f.options.length) return f.options.some((o) => o === m.value);
-    return true;
+    return fromProfile(String(m.value ?? ""));
   });
 }

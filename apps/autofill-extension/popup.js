@@ -180,8 +180,10 @@ $("generate").addEventListener("click", async () => {
 
 $("saveToken").addEventListener("click", async () => {
   const token = $("token").value.trim();
-  if (!token) return;
-  await chrome.storage.local.set({ kairosToken: token });
+  const port = $("port").value.trim();
+  if (port && !/^\d{4,5}$/.test(port)) return setStatus("The port is a number, for example 3000.", "warn");
+  if (!token && !port) return;
+  await chrome.storage.local.set({ ...(token ? { kairosToken: token } : {}), ...(port ? { kairosPort: port } : {}) });
   $("tokenBox").style.display = "none";
   setStatus("Token saved. Reconnecting…", "ok");
   init();

@@ -36,8 +36,17 @@ export function isPrivateAddress(ip: string): boolean {
   }
   if (v === 6) {
     const s = ip.toLowerCase();
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(s);
-    if (mapped) return isPrivateAddress(mapped[1]);
+    // An IPv4 address carried in IPv6 (mapped ::ffff:a.b.c.d, or the same in hex as
+    // URL writes it, ::ffff:7f00:1; the old compatible form ::a.b.c.d; NAT64 64:ff9b::)
+    // is judged as the IPv4 address it carries.
+    const embedded = /^(?:::ffff:(?:0:)?|::|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+    if (embedded) return isPrivateAddress(embedded[1]);
+    const hex = /^(?:::ffff:(?:0:)?|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(s);
+    if (hex) {
+      const hi = parseInt(hex[1], 16);
+      const lo = parseInt(hex[2], 16);
+      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
     return s === "::" || s === "::1" || /^f[cd]/.test(s) || /^fe[89ab]/.test(s) || /^ff/.test(s);
   }
   return false;

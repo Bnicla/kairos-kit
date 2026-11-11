@@ -14,7 +14,7 @@ ATS page (Greenhouse/Lever/Ashby)
    │      │  fetch
    │      ▼
    └─ localhost:3000/api/autofill-profile   ← your profile (contact, work auth, EEO, work history)
-      localhost:3000/api/file/<appId>/resume.docx  ← the résumé to attach
+      localhost:3000/api/file/<appId>/resume.pdf   ← the résumé to attach (.docx if no PDF)
                     ▲
               ~/Kairos/autofill.json + knowledge base
 ```
@@ -27,7 +27,7 @@ ATS page (Greenhouse/Lever/Ashby)
 
 ## Prerequisites
 
-1. The Kairos local dashboard running on `http://localhost:3000`
+1. The Kairos local dashboard running (`http://localhost:3000`, or the port set in the popup)
    (`npm -w kairos-local run dev`, or however you start it).
 2. `~/Kairos/autofill.json` present (already created) — edit your EEO/demographic
    choices and standard answers there. Work history + résumés are automatic.
@@ -54,13 +54,18 @@ résumé attached.
 
 - **Supported ATSes:** Greenhouse, Lever, Ashby (clean DOMs). Workday and iCIMS
   are not supported yet (custom web components / iframes — a bigger job).
-- **Résumé format:** `.docx` (what Kairos renders). Most ATSes accept it; a PDF
-  option can be added later via the `render_pdf` path.
+- **Résumé format:** the PDF when one has been rendered, otherwise the `.docx`.
+- **Dashboard port:** 3000 unless you set another in the popup's settings (the
+  same number as `KAIROS_PORT`).
+- **What a page can see:** a job site's own scripts can read a field as soon as
+  it is filled, before you submit. Text fields are filled only with values from
+  your profile (anything else the mapping proposes is dropped), and EEO answers
+  only when `share_eeo` is on.
 - **Résumé auto-attach** is best-effort; some upload widgets intercept the file
   differently, in which case attach it manually.
-- **Free-text questions** ("why this company?") are **not** drafted yet — that's
-  Phase 2 (draft from the qa-bank via the local Max/`claude -p` channel, editable
-  before it fills).
+- **Free-text questions** ("why this company?") are not drafted by the
+  extension. Use `/apply` in Claude Code (Claude in Chrome), which drafts them
+  from your earlier answers and asks you to approve each one.
 
 ## Files
 

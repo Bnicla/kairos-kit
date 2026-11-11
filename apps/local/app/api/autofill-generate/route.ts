@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ingestPastedText } from "@kairos/engine/ingest";
 import { getStore } from "@/store";
 import { createApplication, loadIndex } from "@kairos/engine/applications";
 import { rejectUnauthorized } from "@/lib/autofill";
@@ -38,7 +39,11 @@ export async function POST(req: NextRequest) {
   if (!company || !title) {
     return NextResponse.json({ ok: false, error: "missing company/title" }, { status: 400, headers: corsHeaders(req) });
   }
-  const snapshot = text || `# ${title} — ${company}\n\n(Captured from ${url} by the autofill extension.)\n\n${url ?? ""}`;
+  // The posting text goes through the same guard as capture_job_ad: hidden markup and
+  // invisible characters removed, and the guard's verdict kept in the snapshot.
+  const snapshot = text
+    ? ingestPastedText(String(text).slice(0, 200_000), { company, title, source_url: url }).markdown
+    : `# ${title} — ${company}\n\n(Captured from ${url} by the autofill extension.)\n\n${url ?? ""}`;
   // Reuse an existing ACTIVE application for the same role instead of creating a
   // duplicate. The extension sends the URL slug as the company ("acmecorp"),
   // which differs from the tracked name ("Acme Corp"), so match with all
@@ -65,7 +70,7 @@ export async function POST(req: NextRequest) {
   })();
 
   return NextResponse.json(
-    { ok: true, appId, reused: !!existing, board_url: "http://localhost:3000" },
+    { ok: true, appId, reused: !!existing, board_url: `http://${req.headers.get("host") ?? "localhost:3000"}` },
     { headers: corsHeaders(req) },
   );
 }

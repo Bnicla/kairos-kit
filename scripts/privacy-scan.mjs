@@ -64,6 +64,12 @@ export const GENERIC = [
     ok: (m) => /\/(Users|home)\/(you|user|username|runner|me|<[^>]*>|\$USER|name|alex|jane|student|example|shared|Shared)$/i.test(m),
   },
   {
+    // Keys and tokens in their published formats: Anthropic, OpenAI, GitHub, AWS, Slack, Google, private keys.
+    label: "key or token",
+    re: /(sk-ant-[A-Za-z0-9_-]{20,}|sk-(proj-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abposr]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/g,
+    ok: (m) => /(x{6,}|example|placeholder|0{8,}|\.\.\.)/i.test(m),
+  },
+  {
     label: "phone number",
     re: /(?<![\d.])(\+1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?!\d)/g,
     ok: (m) => PHONE_OK.test(m),

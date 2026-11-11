@@ -3,7 +3,7 @@
 ## 0. Before you start
 
 - A Mac on macOS 14 or newer, with `git`: `xcode-select --install`.
-- Homebrew (brew.sh), then Node 22: `brew install node@22`.
+- Homebrew (brew.sh), then Node 22 (22.17 or newer) or 24: `brew install node@22`.
 - Claude Code installed and signed in with a Claude Pro or Max plan. Run
   `claude` once in Terminal to check.
 - Your résumé (PDF or DOCX). A LinkedIn export or other documents help.
@@ -11,7 +11,7 @@
 ## 1. Install
 
 ```bash
-git clone <this repository's address> ~/kairos-kit
+git clone https://github.com/Bnicla/kairos-kit.git ~/kairos-kit
 cd ~/kairos-kit
 ./install.sh
 ```

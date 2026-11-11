@@ -24,3 +24,17 @@ describe("prepare_extraction reads documents only", () => {
     await expect(checkSourcePath(dir)).rejects.toThrow(/not a LinkedIn/);
   });
 });
+
+describe("the data folder is never written through a link", () => {
+  it("refuses a folder link that leads outside", async () => {
+    const { LocalStore } = await import("../apps/local/store/local-fs");
+    const root = mkdtempSync(join(tmpdir(), "kairos-root-"));
+    const outside = mkdtempSync(join(tmpdir(), "kairos-out-"));
+    symlinkSync(outside, join(root, "applications"));
+    const store = new LocalStore(root);
+    await expect(store.writeFile(["applications", "x.md"], "hi")).rejects.toThrow(/outside the data folder/);
+    await expect(store.writeFile(["profile.md"], "ok")).resolves.toContain("profile.md");
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+});

@@ -89,7 +89,7 @@ Return the JSON array of { id, value } now.`;
   try {
     const out = await runClaude(prompt, 55_000);
     const mappings = extractMappingArray(out);
-    const safe = filterSafeMappings(fields, mappings);
+    const safe = filterSafeMappings(fields, mappings, profileForMap);
     return NextResponse.json({ mappings: safe }, { headers: corsHeaders(req) });
   } catch (e) {
     return NextResponse.json(

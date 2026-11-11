@@ -1,13 +1,20 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { askToSave, changedFields, clip, newLines, type Confirmer } from "../apps/local/lib/record-confirm";
+import { askToSave, changedFields, diffPreview, fits, jsonDiff, newLines, removedLines, type Confirmer } from "../apps/local/lib/record-confirm";
 
 describe("record-confirm helpers", () => {
+  const confirmer = (supports: boolean, action: "accept" | "decline" | "cancel", seen: string[] = []): Confirmer => ({
+    supportsElicitation: () => supports,
+    elicit: async (p) => {
+      seen.push(p.message);
+      return { action };
+    },
+  });
   it("newLines keeps only lines that are not already on file", () => {
     expect(newLines("- a [R]\n- b [R]\n", "- a [R]\n- b [R]\n- c [C]\n\n")).toEqual(["- c [C]"]);
     expect(newLines(null, "x\n\ny")).toEqual(["x", "y"]);
@@ -20,19 +27,26 @@ describe("record-confirm helpers", () => {
     ]);
   });
 
-  it("clip caps a long preview", () => {
-    const out = clip(Array.from({ length: 100 }, (_, i) => `line ${i}`));
-    expect(out.split("\n")).toHaveLength(41);
-    expect(out).toMatch(/and 60 more line/);
+  it("a replaced file shows what is removed as well as what is new", () => {
+    const before = "- led the launch [R]\n- grew revenue 20% [R]\n";
+    const after = "- led the launch [R]\n- managed a team of 4 [C]\n";
+    expect(removedLines(before, after)).toEqual(["- grew revenue 20% [R]"]);
+    expect(diffPreview(newLines(before, after), removedLines(before, after))).toEqual(["New or changed:", "+ - managed a team of 4 [C]", "", "Removed:", "- - grew revenue 20% [R]"]);
   });
 
-  const confirmer = (supports: boolean, action: "accept" | "decline" | "cancel", seen: string[] = []): Confirmer => ({
-    supportsElicitation: () => supports,
-    elicit: async (p) => {
-      seen.push(p.message);
-      return { action };
-    },
+  it("jsonDiff lists changed and removed values by path", () => {
+    expect(jsonDiff({ contact: { phone: "1", city: "A" }, t: "x" }, { contact: { phone: "2" }, t: "y" }, ["t"])).toEqual(["New or changed:", "+ contact.phone: 2", "", "Removed:", "- contact.phone: 1", "- contact.city: A"]);
   });
+
+  it("a preview too long to show in full is refused, never cut", async () => {
+    const long = Array.from({ length: 200 }, (_, i) => `line ${i}`);
+    expect(fits(long)).toBe(false);
+    const seen: string[] = [];
+    expect(await askToSave(confirmer(true, "accept", seen), "add a role", long)).toMatch(/too long to show/);
+    expect(seen).toEqual([]);
+  });
+
+
 
   it("askToSave: approved only on the user's Accept", async () => {
     const seen: string[] = [];
@@ -89,6 +103,27 @@ describe("Kairos MCP server: writes to the record need the user's approval", () 
     await client.close();
     expect(r.isError).toBe(true);
     expect(profile()).not.toContain("Head of Everything");
+  }, 60_000);
+
+  it("prepare_extraction: the user approves the exact file before it is read", async () => {
+    const doc = join(home, "resume.txt");
+    writeFileSync(doc, "Jordan Example\nData analyst intern at Acme, 2024. Built the weekly dashboard used by the sales team. ".repeat(3));
+    const { client, asked } = await connect("decline");
+    const r = await client.callTool({ name: "prepare_extraction", arguments: { path: doc } });
+    await client.close();
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/Nothing was read/);
+    expect(asked[0]).toContain("resume.txt");
+    expect(text(r)).not.toContain("weekly dashboard");
+  }, 60_000);
+
+  it("save_autofill asks too", async () => {
+    const { client, asked } = await connect("decline");
+    const r = await client.callTool({ name: "save_autofill", arguments: { contact: { phone: "555-0100" } } });
+    await client.close();
+    expect(r.isError).toBe(true);
+    expect(asked[0]).toContain("555-0100");
+    expect(existsSync(join(home, "autofill.json"))).toBe(false);
   }, 60_000);
 
   it("accept: saved", async () => {

@@ -314,6 +314,17 @@ interface MetricToken {
  * Years (1900–2099), date ranges, and "N+ years" tenure math are excluded —
  * they're derivable, not claims.
  */
+/**
+ * Numbers in a free-form document (a cover letter) that appear nowhere in the
+ * sources it may use: the verified record (unverified facts removed), plus
+ * `extraCorpus` (profile, education, the posting itself). Each returned token
+ * is a number the writer could not have taken from the record.
+ */
+export function ungroundedNumbers(text: string, experiences: Experience[], extraCorpus = ""): string[] {
+  const corpus = experiences.map((e) => normalizeMetrics(serializeExperience(stripUnverified(e)))).join("\n") + "\n" + normalizeMetrics(extraCorpus);
+  return [...new Set(extractMetricTokens(text).filter((t) => !corpus.includes(t.normalized)).map((t) => t.raw))];
+}
+
 export function extractMetricTokens(text: string): MetricToken[] {
   const out: MetricToken[] = [];
   const re = /(?:[$€£]\s?\d[\d.,]*\s?[MBKmbk]?\+?)|(?:\d[\d.,]*\s?%)|(?:\b\d[\d,]*\+)|(?:\b\d{1,3}(?:,\d{3})+\b)|(?:\b\d+(?:\.\d+)?\s?[MBK]\b\+?)/g;

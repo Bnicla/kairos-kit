@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import matter from "gray-matter";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getStore } from "@/store";
@@ -47,10 +48,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
     const store = getStore();
     const experiences = await loadExperiences(store);
-    const profile = (await store.readFile(["profile.md"])) ?? "";
-    const lines = profile.split("\n").map((l) => l.trim()).filter(Boolean);
-    const contact = lines.find((l) => l.includes("@"));
-    return NextResponse.json(grade(experiences, contact, "AI Technical Product Leader"));
+    // The user's own contact line and headline, from profile.md.
+    const fm = matter((await store.readFile(["profile.md"])) ?? "").data as { contact_line?: unknown; headline?: unknown };
+    const contact = typeof fm.contact_line === "string" ? fm.contact_line : undefined;
+    const headline = typeof fm.headline === "string" ? fm.headline : undefined;
+    return NextResponse.json(grade(experiences, contact, headline));
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to load." },

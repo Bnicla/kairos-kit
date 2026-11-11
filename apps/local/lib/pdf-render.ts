@@ -1,6 +1,7 @@
 // NOTE: intentionally NOT "server-only" — imported by the MCP server (raw tsx)
 // as well as the Next app; the server-only guard throws outside Next's bundler.
 // Server-side by construction (spawns LibreOffice).
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { copyFile, rename, rm, readdir, readFile } from "node:fs/promises";
@@ -20,7 +21,15 @@ import { submissionFileName, type SubmissionDoc } from "@kairos/engine/file-name
  */
 
 const execFileAsync = promisify(execFile);
-const SOFFICE = process.env.SOFFICE_PATH ?? "/opt/homebrew/bin/soffice";
+/**
+ * LibreOffice's command-line program: SOFFICE_PATH, then Homebrew's link, then
+ * the app itself (where `brew install --cask libreoffice` and the download put it).
+ */
+export function sofficePath(): string {
+  const candidates = [process.env.SOFFICE_PATH, "/opt/homebrew/bin/soffice", "/usr/local/bin/soffice", "/Applications/LibreOffice.app/Contents/MacOS/soffice"];
+  return candidates.find((p): p is string => !!p && existsSync(p)) ?? process.env.SOFFICE_PATH ?? "/opt/homebrew/bin/soffice";
+}
+const SOFFICE = sofficePath();
 // Isolated profile so conversion never pops a window or collides with the
 // user's own LibreOffice session. Distinct from the layout probe's profile so
 // the two can run concurrently without locking each other out.

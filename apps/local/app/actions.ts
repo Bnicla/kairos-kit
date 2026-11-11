@@ -193,8 +193,12 @@ export async function markSubmittedAction(formData: FormData) {
 
   const file = formData.get("resume");
   if (file && typeof file !== "string" && file.size > 0) {
+    // A PDF or DOCX of at most 10 MB, checked by its first bytes as well as its name.
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if ((ext !== "pdf" && ext !== "docx") || file.size > 10 * 1024 * 1024) throw new Error("The submitted résumé must be a PDF or DOCX file of at most 10 MB.");
     const buf = Buffer.from(await file.arrayBuffer());
-    const ext = (file.name.split(".").pop() || "docx").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const magic = buf.subarray(0, 4).toString("latin1");
+    if ((ext === "pdf" && magic !== "%PDF") || (ext === "docx" && magic !== "PK\x03\x04")) throw new Error(`That file is not a real ${ext.toUpperCase()}.`);
     const fname = `submitted-resume.${ext}`;
     await store.writeBinary(["applications", id, fname], buf, file.type || "application/octet-stream");
     patch.submitted_file = fname;
