@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Local-only access check for the dashboard, on when KAIROS_LOCAL_ONLY=1 (the
+ * Local-only access check for the dashboard (Next.js "proxy", formerly middleware), on when KAIROS_LOCAL_ONLY=1 (the
  * Kit's launch script sets it; without it nothing changes).
  *
  * - The Host header must name this computer. A web page that points its own
@@ -36,7 +36,7 @@ export function originAllowed(origin: string | null, path: string, host: string 
   }
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   if (process.env.KAIROS_LOCAL_ONLY !== "1") return NextResponse.next();
   if (!hostIsLocal(req.headers.get("host"))) return new NextResponse("This dashboard answers only on this computer (localhost).", { status: 403 });
   const safe = req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";

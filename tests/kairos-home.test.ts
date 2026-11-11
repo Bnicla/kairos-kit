@@ -80,7 +80,8 @@ describe.skipIf(!zsh)("install.sh data folder", () => {
     }
   };
 
-  it("refuses an existing record it did not create, and changes nothing", () => {
+  // install.sh runs a few node processes: give it room when the whole suite runs in parallel.
+  it("refuses an existing record it did not create, and changes nothing", { timeout: 30_000 }, () => {
     const record = join(fakeHome, "Kairos");
     mkdirSync(join(record, "knowledge-base"), { recursive: true });
     writeFileSync(join(record, "profile.md"), "someone's record\n");
@@ -91,7 +92,8 @@ describe.skipIf(!zsh)("install.sh data folder", () => {
     expect(existsSync(join(record, ".kairos-kit"))).toBe(false);
   });
 
-  it("accepts it with --use-existing and records it without writing into it", () => {
+  // install.sh runs a few node processes: give it room when the whole suite runs in parallel.
+  it("accepts it with --use-existing and records it without writing into it", { timeout: 30_000 }, () => {
     const record = join(fakeHome, "Kairos");
     mkdirSync(join(record, "applications"), { recursive: true });
     const r = run("--use-existing");
@@ -102,7 +104,8 @@ describe.skipIf(!zsh)("install.sh data folder", () => {
     expect(run().code).toBe(0);
   });
 
-  it("creates a new folder with --home, marks it, records it, and keeps .mcp.json plain", () => {
+  // install.sh runs a few node processes: give it room when the whole suite runs in parallel.
+  it("creates a new folder with --home, marks it, records it, and keeps .mcp.json plain", { timeout: 30_000 }, () => {
     const target = join(fakeHome, "KairosKit");
     const r = run("--home", target);
     expect(r.code).toBe(0);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostIsLocal, originAllowed } from "../apps/local/middleware";
+import { hostIsLocal, originAllowed } from "../apps/local/proxy";
 
 describe("dashboard access check", () => {
   it("knows this computer's host names", () => {

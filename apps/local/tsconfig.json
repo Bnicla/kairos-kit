@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
@@ -11,12 +15,20 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "incremental": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "allowJs": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./*"],
-      "@kairos/engine/*": ["../../packages/engine/*"]
+      "@/*": [
+        "./*"
+      ],
+      "@kairos/engine/*": [
+        "../../packages/engine/*"
+      ]
     }
   },
   "include": [
@@ -25,7 +37,10 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     "../../packages/engine/**/*.ts",
-    "../../tests/**/*.ts"
+    "../../tests/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

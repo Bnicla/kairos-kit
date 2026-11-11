@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Kairos Kit dashboard as a service (launchd: com.kairos-kit.dashboard, set up
 # by install.sh). Serves http://localhost:${KAIROS_PORT:-3000} to this computer only
-# (bound to 127.0.0.1; access check in apps/local/middleware.ts). launchd restarts
+# (bound to 127.0.0.1; access check in apps/local/proxy.ts). launchd restarts
 # it if it stops. Run only one dashboard per checkout: two dev servers share
 # .next and break each other.
 set -u
