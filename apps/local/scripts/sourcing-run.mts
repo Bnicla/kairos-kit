@@ -141,7 +141,8 @@ const result = await runSourcingSweep({
     // a 20-minute sweep should not ship the unranked fallback because of one
     // transient CLI error (observed 2026-09-08).
     const run = async () => {
-      const child = execFileAsync(claude, ["-p"], { timeout: 8 * 60_000, maxBuffer: 10 * 1024 * 1024 });
+      // Triage only writes text, and its prompt is posting text: no tools, no MCP servers, no saved session.
+      const child = execFileAsync(claude, ["-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence"], { timeout: 8 * 60_000, maxBuffer: 10 * 1024 * 1024 });
       child.child.stdin?.write(prompt);
       child.child.stdin?.end();
       const { stdout } = await child;

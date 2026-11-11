@@ -23,6 +23,13 @@ well:
 Your data stays on your machine, in a data folder outside this repository
 (`~/Kairos` by default). The kit's code never sends it anywhere.
 
+## How it works
+
+[docs/architecture.md](docs/architecture.md) shows how the parts fit together,
+the data folder's layout, one application from posting to submitted form, and
+the controls that keep the output true to the user's record. To report a
+security problem, see [SECURITY.md](SECURITY.md).
+
 ## Design decisions
 
 Each one is written up in `docs/adr`, with the context and the costs accepted.
@@ -121,6 +128,7 @@ data.
 | `apps/autofill-extension` | Chrome extension that fills application forms from your knowledge base |
 | `.claude/skills/kairos` | The skill that drives the workflows |
 | `.claude/commands` | The slash commands |
+| `docs/architecture.md` | How the parts fit together, and the controls |
 | `docs/adr` | Design decisions |
 | `evals` | Evaluation cases, including a prompt-injection set |
 | `demo/` | The demo record |
