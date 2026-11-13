@@ -1,5 +1,5 @@
 import type { Experience } from "@kairos/engine/kb/types";
-import { serializeExperience, stripUnverified } from "@kairos/engine/kb/experience";
+import { serializeExperience, stripUnverified, untaggedFacts } from "@kairos/engine/kb/experience";
 import type { GeneratedResume } from "@kairos/engine/types";
 
 /**
@@ -178,7 +178,10 @@ const supportSentences = (exps: Experience[], guard: RegExp) =>
 export function deniedPhrases(exps: Experience[]): string[] {
   const out = new Set<string>();
   for (const e of exps) {
-    for (const line of serializeExperience(stripUnverified(e)).split("\n")) {
+    // A fact with no tag is left out of the evidence, but a denial written on
+    // one still binds: dropping it would let the forbidden wording through.
+    const lines = [...serializeExperience(stripUnverified(e)).split("\n"), ...untaggedFacts(e.body).map((u) => u.text)];
+    for (const line of lines) {
       for (const sentence of line.split(/(?<=[.;])\s+/)) {
         const m = sentence.match(/\b(do not|don't|never|supersedes)\b/i);
         if (!m || m.index === undefined) continue;

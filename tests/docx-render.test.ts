@@ -27,14 +27,16 @@ const documentXml = async (buf: Buffer) =>
   (await (await JSZip.loadAsync(buf)).file("word/document.xml")!.async("string"));
 
 describe("paper size", () => {
-  it("defaults to A4, the size the default layout is calibrated on, set explicitly in the file", async () => {
+  it("with no paper given, renders US Letter (the default search is the United States), set explicitly in the file", async () => {
     const xml = await documentXml(await markdownResumeToDocx(MD));
-    expect(xml).toMatch(/<w:pgSz[^>]*w:w="11906"[^>]*w:h="16838"/);
+    expect(xml).toMatch(/<w:pgSz[^>]*w:w="12240"[^>]*w:h="15840"/);
+    const letter = await documentXml(await markdownLetterToDocx("Jane Doe\n\nDear team,\n\nHello."));
+    expect(letter).toMatch(/<w:pgSz[^>]*w:w="12240"[^>]*w:h="15840"/);
   });
 
-  it("renders US Letter when the template asks for it", async () => {
-    const xml = await documentXml(await markdownResumeToDocx(MD, { template: { paper: "letter" } }));
-    expect(xml).toMatch(/<w:pgSz[^>]*w:w="12240"[^>]*w:h="15840"/);
+  it("renders A4 when the template asks for it", async () => {
+    const xml = await documentXml(await markdownResumeToDocx(MD, { template: { paper: "a4" } }));
+    expect(xml).toMatch(/<w:pgSz[^>]*w:w="11906"[^>]*w:h="16838"/);
   });
 
   it("puts the right-aligned date tab at the text edge of the chosen paper", async () => {

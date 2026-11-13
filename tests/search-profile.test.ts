@@ -30,9 +30,10 @@ describe("deriveSearchProfile", () => {
     expect(p.source).toBe("derived");
   });
 
-  it("falls back to a product default when no discipline is recognizable", () => {
+  it("assumes no discipline and no excludes when the candidate profile states none", () => {
     const empty = deriveSearchProfile({});
-    expect(empty.function_terms).toEqual(["product"]);
+    expect(empty.function_terms).toEqual([]);
+    expect(empty.exclude_terms).toEqual([]);
     expect(empty.max_age_days).toBe(7);
   });
 

@@ -2,6 +2,7 @@ import type { Experience } from "@kairos/engine/kb/types";
 import { serializeExperience, stripUnverified } from "@kairos/engine/kb/experience";
 import { BANNED_WORDS } from "@kairos/engine/prompts/voice";
 import type { GeneratedResume, RequirementCoverageRow } from "@kairos/engine/types";
+import { DEFAULT_ALLOWED_METRIC_STATUSES, registerEntries, type MetricStatus } from "@kairos/engine/metrics-register";
 
 /**
  * Deterministic quality gates for generated résumés. These run at SAVE time in
@@ -252,10 +253,7 @@ export function checkResumeGrounding(
   }
 
   // Corpus-wide pass: a metric found NOWHERE in verified evidence is fabricated.
-  const prose = [
-    gen.resume.executive_summary,
-    ...gen.resume.experience.flatMap((e) => [e.summary ?? "", ...e.bullets]),
-  ].join("\n");
+  const prose = resumeClaimText(gen);
   for (const token of extractMetricTokens(prose)) {
     if (!corpus.includes(token.normalized)) {
       issues.push({ kind: "ungrounded_metric", detail: `"${token.raw}" not found in any verified KB fact` });
@@ -301,6 +299,71 @@ export function checkResumeGrounding(
     }
   }
   return issues;
+}
+
+/** The résumé text whose numbers are checked: the summary, and each role's summary and bullets. */
+export function resumeClaimText(gen: GeneratedResume): string {
+  return [
+    gen.resume.executive_summary,
+    ...gen.resume.experience.flatMap((e) => [e.summary ?? "", ...e.bullets]),
+  ].join("\n");
+}
+
+// --- Metrics register (number statuses) -------------------------------------
+
+export interface MetricStatusIssue {
+  /** The number as written in the document. */
+  number: string;
+  /** Name, section and status of the register entry it matches. */
+  entry: string;
+  section: string;
+  status: MetricStatus;
+}
+
+/** Comparison form of a number for the register: the metric form, without a sentence's closing "." or ",". */
+const registerKey = (normalized: string) => normalized.replace(/[.,]+$/, "");
+
+/**
+ * Numbers in a document that the metrics register does not allow there.
+ *
+ * A number matches a register entry when it is written anywhere in the entry:
+ * on its header line (`**name** — STATUS note`) or in the bullets under it
+ * (baseline, outcome, caveats). It is refused when every entry it matches has
+ * a status outside `allowed`; one allowed entry carrying the same number is
+ * enough to let it through. Numbers the register does not hold, entries
+ * written with no status word, and a missing or empty register produce no
+ * issue: the grounding check alone decides those, as before.
+ */
+export function registerBlockedNumbers(
+  text: string,
+  registerRaw: string | null | undefined,
+  allowed: readonly MetricStatus[] = DEFAULT_ALLOWED_METRIC_STATUSES,
+): MetricStatusIssue[] {
+  if (!registerRaw?.trim()) return [];
+  const entries = registerEntries(registerRaw).map((e) => ({
+    ...e,
+    numbers: new Set(extractMetricTokens(e.text).map((t) => registerKey(t.normalized))),
+  }));
+  const out: MetricStatusIssue[] = [];
+  const seen = new Set<string>();
+  for (const token of extractMetricTokens(text)) {
+    const key = registerKey(token.normalized);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const matches = entries.filter((e) => e.numbers.has(key));
+    if (!matches.length || matches.some((e) => allowed.includes(e.status))) continue;
+    const m = matches[0];
+    out.push({ number: token.raw.trim(), entry: m.name, section: m.section, status: m.status });
+  }
+  return out;
+}
+
+/** One sentence naming each refused number and its entry, for a save error. */
+export function describeMetricStatusIssues(issues: MetricStatusIssue[], allowed: readonly MetricStatus[] = DEFAULT_ALLOWED_METRIC_STATUSES): string {
+  return (
+    issues.map((i) => `"${i.number}" matches the metrics-register entry "${i.entry}" (${i.status}, under "${i.section}")`).join("; ") +
+    `. Only ${allowed.join(" and ")} numbers may appear in a document: remove the number, or have the user settle its status in the register first.`
+  );
 }
 
 interface MetricToken {

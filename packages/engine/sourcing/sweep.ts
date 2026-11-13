@@ -25,7 +25,7 @@ import {
 } from "./filter";
 import { registryKey } from "./registry-loader";
 import { postingKey } from "./url-key";
-import { allTriageRules } from "./search-profile";
+import { allTriageRules, feedSearchTerms } from "./search-profile";
 import {
   applyTriage,
   buildTriagePrompt,
@@ -152,8 +152,8 @@ export interface SweepResultFile {
    * When triage was requested but failed, the reason (e.g. expired CLI auth).
    * Null on a clean run. Lets the Sourced page warn that the list is the
    * UNRANKED deterministic fallback instead of silently degrading — the
-   * fallback buries priority roles (Chief of Staff, Group PM) the model would
-   * have surfaced. null/absent = triage ran (or was never requested).
+   * fallback buries priority roles the model would have surfaced.
+   * null/absent = triage ran (or was never requested).
    */
   triage_error?: string | null;
   /**
@@ -249,17 +249,42 @@ export function rankable(profile: SearchProfile, deepScan = false): (p: Posting)
 
 /**
  * What the adapters need from the sweep, per lane: which postings deserve a
- * detail call, and how deep to page a Workday list. Daily: stop once a
- * newest-first list is past the recency window, at most WORKDAY_MAX_PAGES
- * pages. Deep: no recency stop, at most WORKDAY_MAX_PAGES_DEEP pages. Shared
- * with the miss audit so it sees what the sweep sees.
+ * detail call, what to search a search-only site for, and how deep to page a
+ * Workday list. Daily: stop once a newest-first list is past the recency
+ * window, at most WORKDAY_MAX_PAGES pages. Deep: no recency stop, at most
+ * WORKDAY_MAX_PAGES_DEEP pages. The search words and the titles worth a date
+ * call come from the profile (its search or function terms, its function
+ * gate). Shared with the miss audit so it sees what the sweep sees.
  */
 export function sweepFetchOptions(profile: SearchProfile, deepScan = false): FetchOptions {
   return {
     resolveLocationFor: rankable(profile, deepScan),
     maxAgeDays: deepScan ? undefined : profile.max_age_days,
     workdayMaxPages: deepScan ? WORKDAY_MAX_PAGES_DEEP : WORKDAY_MAX_PAGES,
+    searchTerms: feedSearchTerms(profile).terms,
+    dateWorthy: (title) => passesFunctionGate(title, profile),
   };
+}
+
+/**
+ * What the profile cannot find as written, in plain lines for the run log:
+ * no function terms (nothing passes the function gate), and search words the
+ * cap left out of the search-only sites.
+ */
+export function searchProfileWarnings(profile: SearchProfile): string[] {
+  const out: string[] = [];
+  if (!(profile.function_terms ?? []).some((t) => t.trim())) {
+    out.push(
+      "the search profile names no target role (function_terms is empty): no posting can pass the function gate, so this run finds nothing. Add the roles you are looking for to the search profile.",
+    );
+  }
+  const { terms, left_out } = feedSearchTerms(profile);
+  if (left_out.length) {
+    out.push(
+      `search-only job sites (Workday) are searched for ${terms.map((t) => `"${t}"`).join(", ")} only; not searched: ${left_out.map((t) => `"${t}"`).join(", ")}. Set search_terms in the search profile to choose the words.`,
+    );
+  }
+  return out;
 }
 
 export type FetchStats = NonNullable<SweepResultFile["fetch_stats"]>;
@@ -352,6 +377,7 @@ export async function runSourcingSweep(input: SweepInput): Promise<SweepResultFi
     input.maxBoards === undefined ? undefined : input.maxBoards + (input.extraBoards?.length ?? 0),
   );
 
+  for (const warning of searchProfileWarnings(input.profile)) input.onLog?.(warning);
   const fetchOptions = sweepFetchOptions(input.profile, input.deepScan);
   const worthLocation = fetchOptions.resolveLocationFor!;
   const { postings: all, stats } = await fetchBoards({

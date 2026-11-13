@@ -99,3 +99,22 @@ export function resolveRegistry(
     duplicates_removed: removed,
   };
 }
+
+/**
+ * Whether a harvest is due: true when the registry a sweep would use (the
+ * data-folder copy, else the seed) is undated or older than
+ * REGISTRY_STALE_DAYS. The harvest script asks this itself. A file date in
+ * the checkout cannot answer it: the refreshed list is written to the data
+ * folder, so the seed file never changes between code updates.
+ */
+export function registryNeedsHarvest(dataCopy: unknown, seed: RegistryFile, now = Date.now()): boolean {
+  return resolveRegistry(dataCopy, seed, now).staleness !== null;
+}
+
+/**
+ * The boards a harvest starts from: the data-folder copy's, then the boards
+ * only the seed has (a code update can ship new ones). First spelling wins.
+ */
+export function harvestBase(dataCopy: unknown, seed: RegistryFile): RegistryEntry[] {
+  return dedupeRegistry([...(parseRegistry(dataCopy)?.entries ?? []), ...seed.entries]).entries;
+}

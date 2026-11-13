@@ -125,7 +125,8 @@ export default async function Dashboard({
 
         {applications.length === 0 ? (
           <div className="card text-muted p-8 text-center text-sm">
-            No applications yet. In Claude Code, run <code>/kairos</code> and share a job to score it.
+            No applications yet. In Claude Code, run <code>/score</code> with a job link to score a posting. If your
+            record is not built yet, run <code>/setup</code> first.
           </div>
         ) : (
           <PipelineBoard applications={applications} sourced={sourcedCards} sourcedTotal={allSourced.length} sourcedRanAt={sourcedRun?.ran_at} />
@@ -176,7 +177,7 @@ export default async function Dashboard({
       </section>
 
       <footer className="text-muted mt-10 text-center text-xs">
-        Reading from <code>{home}</code> · a read-only view of your local files
+        Reading from <code>{home}</code> · changes made here (status, archive, delete) are written to these files
       </footer>
     </div>
   );

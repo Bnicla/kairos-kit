@@ -28,6 +28,29 @@ export interface SearchProfile {
   function_terms: string[];
   /** Title containing any of these is dropped (noise gate). */
   exclude_terms: string[];
+  /**
+   * Words sent as the search text to job sites that only answer a search
+   * (Workday): one paged query per word, capped (see feedSearchTerms). Absent
+   * or empty: the first few function_terms. Set it when the function terms are
+   * many, or when one broad word finds everything ("engineer", "nurse").
+   */
+  search_terms?: string[];
+  /**
+   * Exact phrases that name the user's own role in a job title, whole words,
+   * any case (e.g. "software engineer", "engineering manager"). Read only
+   * together with soft_exclude_terms.
+   */
+  role_phrases?: string[];
+  /**
+   * The exclude_terms that name something the role may work for or with, as
+   * opposed to a role or domain that is never a fit (e.g. "sales" for a
+   * software engineer: "Software Engineer, Sales Platform" is a fit, "Sales
+   * Engineer" is not). A term listed here still excludes, except on a title
+   * that carries a role phrase in a different part of the title (parts are
+   * split on punctuation). Absent or empty, or no role_phrases: every exclude
+   * term blocks unconditionally.
+   */
+  soft_exclude_terms?: string[];
   /** Substrings marking a location as a direct match (lowercased compare). */
   locations: string[];
   /** Words that boost ranking when present in the title. */

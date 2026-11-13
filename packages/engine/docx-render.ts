@@ -35,7 +35,12 @@ export interface TemplateSpec {
   company: number;
   role: number;
   pageMarginTwips: number;
-  /** Paper size. Set explicitly: docx defaults to A4 when none is given. */
+  /**
+   * Paper size, always written into the file (the docx library would otherwise
+   * fall back to A4). The save and render paths pass the user's setting
+   * (settings.resumePaper: profile.md `paper`, else US Letter for a United
+   * States search and A4 otherwise).
+   */
   paper: Paper;
 }
 
@@ -50,6 +55,12 @@ export const PAPER_TWIPS: Record<Paper, { width: number; height: number }> = {
 // Spacing/size RENDER-VERIFIED (not estimated) to fill a full 2 pages without
 // spilling to a 3rd — see scripts/render-resume.sh (LibreOffice headless →
 // page PNGs). keepNext/keepLines below keep roles intact across the break.
+// That calibration was done on A4. US Letter holds a little less: measured
+// 2026-11-13 with the layout probe on an invented six-role résumé, two pages
+// took up to 1,458 words on A4 (page 2 97% full) and up to 1,365 on Letter
+// (94%); 1,393 words and more ran to a third page on Letter. The spacing is
+// the same on both papers; the layout probe and the fit loops find the page
+// count on whichever paper is used.
 export const DEFAULT_TEMPLATE: TemplateSpec = {
   font: "Calibri",
   ink: "222222",
@@ -63,11 +74,11 @@ export const DEFAULT_TEMPLATE: TemplateSpec = {
   company: 22, // 11pt (uppercase)
   role: 22, // 11pt
   pageMarginTwips: 720, // 0.5" — matches the candidate-preferred tight layout
-  // A4: the 2-page fit above was render-verified on A4 (docx's implicit
-  // default before the size was set explicitly). On US Letter the same content
-  // runs to 3 pages (measured 2026-10-27), so a Letter template needs its own
-  // calibrated spacing and word band, not just a different size.
-  paper: "a4",
+  // US Letter: the default search is limited to the United States. A caller
+  // that knows the user passes settings.resumePaper (profile.md `paper`, else
+  // Letter for a United States search and A4 otherwise); this value is only
+  // what a render with no paper given falls back to.
+  paper: "letter",
 };
 
 export interface DocxOptions {

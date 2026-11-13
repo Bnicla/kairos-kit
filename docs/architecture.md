@@ -60,6 +60,7 @@ search's triage, the dashboard's résumé and form-mapping buttons) run
   sourcing/
     search-profile.json           titles, places, exclusions, schedule for the daily search
     last-run.json, backlog.json, seen.json   results, the Sourced column, every posting already seen
+    registry.json                 the list of job boards, once the daily run has refreshed it
   _index.json                     the board's index (rebuilt by rebuild_index)
   logs/
 ```
@@ -82,7 +83,10 @@ only through the MCP tools; a direct edit needs `rebuild_index` afterwards.
    search profile's filters in code (`filter.ts`), ranks what is left, and sends
    the top of the list to a short triage call. Kept postings appear on the
    board as Sourced. A posting can also come from a link the user pastes
-   (`capture_job_ad`).
+   (`capture_job_ad`). The daily run refreshes the list of job boards when it
+   is over 30 days old and writes the refreshed list to `sourcing/registry.json`
+   in the data folder. The search reads that copy when it exists and the kit's
+   own file otherwise.
 2. **Scored.** `/score` reads the posting, gets the user's evidence with
    `get_scoring_evidence` (unverified facts already removed), and saves a fit
    score with the gaps (`save_score`). Text from the posting is cleaned of

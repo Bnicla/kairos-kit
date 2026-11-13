@@ -58,6 +58,15 @@ if (existsSync(profilePath)) {
   writeFileSync(profilePath, JSON.stringify(searchProfile, null, 2));
   console.log("▸ No search-profile.json yet — derived one from profile.md (edit via the preferences conversation).");
 }
+// No target role named: nothing can pass the function gate, so a sweep of
+// every board would find nothing. Say so and stop before fetching.
+if (!(searchProfile.function_terms ?? []).some((t) => t.trim())) {
+  console.error(
+    "▸ The search profile names no target role (function_terms is empty), so there is nothing to search for.\n" +
+      "  Add the roles you are looking for (the preferences conversation, or /setup), then run the search again.",
+  );
+  process.exit(0);
+}
 
 // -- Dedupe inputs + boards from the user's own applications ------------------
 const APPS = join(KAIROS, "applications");
@@ -313,8 +322,8 @@ if (result.triage_error) {
   const authExpired = /auth|oauth|expired|authenticate/i.test(result.triage_error);
   console.error(
     `\n⚠️  TRIAGE FAILED: ${result.triage_error}\n` +
-      `   The list below is the UNRANKED deterministic fallback — it buries your\n` +
-      `   priority roles (Chief of Staff, Group PM) instead of ranking them.\n` +
+      `   The list below is the UNRANKED deterministic fallback — it is in\n` +
+      `   mechanical order, so the roles that fit you best may sit far down it.\n` +
       (authExpired
         ? `   FIX: the Claude CLI login expired. Mint a long-lived headless token:\n` +
           `        claude setup-token\n` +

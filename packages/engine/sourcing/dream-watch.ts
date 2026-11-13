@@ -63,11 +63,23 @@ export function planDreamWatch(profile: Pick<SearchProfile, "dream_companies"> |
   return plan;
 }
 
-/** Search queries for google/eightfold entries: the entry's own, else the profile's function terms quoted. */
+/**
+ * Search queries for google/eightfold entries: the entry's own, else the
+ * profile's function terms quoted. Neither: no query (fetchDreamCompany then
+ * fails that company with the reason; no role is ever assumed).
+ */
 export function dreamQueries(c: DreamCompany, profile: Pick<SearchProfile, "function_terms">): string[] {
   if (c.queries?.length) return c.queries;
-  const terms = (profile.function_terms ?? []).filter(Boolean);
-  return terms.length ? terms.map((t) => `"${t}"`) : ['"product manager"'];
+  return (profile.function_terms ?? []).filter((t) => typeof t === "string" && t.trim()).map((t) => `"${t.trim()}"`);
+}
+
+/** The queries for a search-only career site, or the error that says what is missing. */
+function requireQueries(c: DreamCompany, profile: Pick<SearchProfile, "function_terms">): string[] {
+  const queries = dreamQueries(c, profile);
+  if (!queries.length) {
+    throw new Error(`${c.name}: nothing to search for. Add "queries" to this dream company, or target roles (function_terms) to the search profile`);
+  }
+  return queries;
 }
 
 async function getJson(f: FetchLike, url: string): Promise<unknown> {
@@ -112,7 +124,7 @@ export async function fetchDreamCompany(
       // every job as jobs/results/<id>-<title-slug> in the initial HTML; titles
       // are rebuilt from the slug (enough for gating; the posting has the real one).
       const out = new Map<string, DreamJob>();
-      for (const q of dreamQueries(c, profile)) {
+      for (const q of requireQueries(c, profile)) {
         const res = await f(
           `https://www.google.com/about/careers/applications/jobs/results?q=${encodeURIComponent(q)}&location=${encodeURIComponent(location)}`,
           { headers: UA },
@@ -137,7 +149,7 @@ export async function fetchDreamCompany(
       // Eightfold career sites: /api/apply/v2/jobs returns JSON per query.
       // Queries are fuzzy; the function gate does the real filtering.
       const out = new Map<string, DreamJob>();
-      for (const q of dreamQueries(c, profile)) {
+      for (const q of requireQueries(c, profile)) {
         const d = (await getJson(
           f,
           `https://${c.host}/api/apply/v2/jobs?domain=${c.domain}&query=${encodeURIComponent(q)}&location=${encodeURIComponent(location)}&num=100&sort_by=new`,

@@ -176,15 +176,15 @@ level) and the level they will not go above. Shape: individual work, leading a
 small team, or a mix.
 Save: `save_profile({ target_seniority, role_shape_preference })` and
 `save_search_profile({ seniority_terms, seniority_ceiling, notes, source: "confirmed" })`.
-For internship searches, remind them that part 7 removes "intern" from the
+For internship searches, check in part 7 that "intern" is not among the
 excluded words.
 
 ### 7. Deal-breakers (`dealbreakers`)
 Industries, companies and kinds of role they will not consider.
 Save: `save_profile({ deal_breakers })` and `save_search_profile({ exclude_terms,
 excluded_companies, triage_rules, source: "confirmed" })`. Title words go in
-`exclude_terms` (the default excludes intern, internship, junior, coordinator,
-apprentice: change it for internship or junior searches); company names in
+`exclude_terms` (the default is empty, except intern, internship, junior and
+apprentice when the stated level is senior); company names in
 `excluded_companies` (lowercase); industries and anything else in plain
 sentences in `triage_rules`.
 

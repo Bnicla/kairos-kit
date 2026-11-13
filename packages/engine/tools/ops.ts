@@ -1,14 +1,14 @@
 import matter from "gray-matter";
 import { resumeLengthPolicy } from "@kairos/engine/length-policy";
-import { readProfileSettings } from "@kairos/engine/settings";
+import { allowedMetricStatuses, loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import type { Store } from "@kairos/engine/store/types";
 import type { GeneratedResume, ScoreReport } from "@kairos/engine/types";
 import { appendScoreVersion, readMeta, readSnapshot, saveResumeSource, updateMeta } from "@kairos/engine/applications";
 import type { ApplicationStatus } from "@kairos/engine/applications";
-import { loadExperiences } from "@kairos/engine/kb/store";
+import { loadEducation, loadExperiences } from "@kairos/engine/kb/store";
 import { checkResumeStretch, type StretchFinding } from "@kairos/engine/stretch";
 import { generatedResumeToMarkdown } from "@kairos/engine/resume-render";
-import { markdownResumeToDocx, type TemplateSpec } from "@kairos/engine/docx-render";
+import { markdownResumeToDocx, type Paper, type TemplateSpec } from "@kairos/engine/docx-render";
 import { GeneratedResumeSchema, ScoreReportSchema, formatIssues } from "@kairos/engine/tools/schemas";
 import {
   checkAtsCoverage,
@@ -16,8 +16,13 @@ import {
   checkResumeGrounding,
   checkResumePerson,
   checkStyle,
+  describeMetricStatusIssues,
   isHardStyleViolation,
+  registerBlockedNumbers,
+  resumeClaimText,
+  ungroundedNumbers,
   type AtsCoverage,
+  type MetricStatusIssue,
   type RequirementCoverageSummary,
   type StyleViolation,
   resolveStylePolicy,
@@ -31,6 +36,7 @@ import {
  * product's guarantees actually live:
  *   - runtime schema validation (zod) with actionable errors
  *   - mechanical grounding against the [?]-stripped KB (anti-fabrication, N1)
+ *   - metrics-register statuses: a number the register does not allow is refused
  *   - machine-checked house style (N5) and ATS-coverage reporting
  *   - requirements coverage: covered/partial rows must quote the résumé itself
  *   - resume.json / resume-source.md / resume.docx written together (no desync)
@@ -82,7 +88,12 @@ export interface SaveResumeResult {
   coverage: RequirementCoverageSummary | null;
   /** Bullets claiming more agency or scope than the KB states: ask keep / soften / drop. */
   stretch: StretchFinding[];
+  /** Paper the .docx was rendered on (profile.md `paper`, else by the search: see settings.resumePaper). */
+  paper: Paper;
 }
+
+/** Where the metrics register lives in a data folder. */
+const METRICS_REGISTER_PATH = ["knowledge-base", "metrics-register.md"];
 
 export async function saveGeneratedResume(
   store: Store,
@@ -124,6 +135,16 @@ export async function saveGeneratedResume(
     );
   }
   for (const g of grounding) warnings.push(`[${g.kind}] ${g.detail}`);
+
+  // Metrics register: a number on record can still be one the user has not
+  // defended (OPEN, PARTIAL) or has withdrawn (RETIRED). With no register, or
+  // for a number the register does not hold, nothing changes.
+  const settings = readProfileSettings(profileRaw);
+  const allowedStatuses = allowedMetricStatuses(settings);
+  const blocked = registerBlockedNumbers(resumeClaimText(gen), await store.readFile(METRICS_REGISTER_PATH), allowedStatuses);
+  if (blocked.length) {
+    throw new Error(`Resume uses a number the metrics register does not allow: ${describeMetricStatusIssues(blocked, allowedStatuses)}`);
+  }
 
   // Stretch (2026-11-03): ownership verbs and absolutes must be supported by a
   // verified fact of that employer. A phrasing the KB explicitly forbids blocks;
@@ -178,9 +199,7 @@ export async function saveGeneratedResume(
   // Only a two-page résumé has a word floor. The page target comes from
   // profile.md (target_pages) or, when unset, from the years in the record, so
   // a student's one-page résumé with four entries is never sent back as short.
-  const pagePolicy = resumeLengthPolicy(experiences, {
-    override: readProfileSettings(await store.readFile(["profile.md"])).target_pages,
-  });
+  const pagePolicy = resumeLengthPolicy(experiences, { override: settings.target_pages });
   const fullCareerResume = pagePolicy.targetPages === 2 && gen.resume.experience.length >= 4; // skip gate for short/test fixtures
   if (fullCareerResume && wordCount < 1050) {
     throw new Error(
@@ -223,9 +242,11 @@ export async function saveGeneratedResume(
   // Persist the three artifacts together so they can never desync.
   await store.writeJson(["applications", appId, "resume.json"], gen);
   await saveResumeSource(store, appId, md);
+  // Paper: an uploaded template's own size wins, else the user's setting.
+  const paper = opts.template?.paper ?? (await loadResumePaper(store));
   const docx = await markdownResumeToDocx(md, {
     ...(opts.headline ? { headline: opts.headline } : {}),
-    ...(opts.template ? { template: opts.template } : {}),
+    template: { ...opts.template, paper },
   });
   await store.writeBinary(
     ["applications", appId, "resume.docx"],
@@ -235,7 +256,58 @@ export async function saveGeneratedResume(
   const status = await advanceDraftStatus(store, appId, "drafted");
   if (status) await updateMeta(store, appId, { status });
 
-  return { warnings, ats, style, provenanceEntries: gen.provenance_audit.length, coverage, stretch };
+  return { warnings, ats, style, provenanceEntries: gen.provenance_audit.length, coverage, stretch, paper };
+}
+
+export interface LetterNumberCheck {
+  /** Numbers found in no source the letter may use. */
+  ungrounded: string[];
+  /** Numbers the metrics register does not allow in a document. */
+  blocked: MetricStatusIssue[];
+  /** Why the letter cannot be saved, or null when its numbers are clean. */
+  message: string | null;
+}
+
+/**
+ * The number check every cover-letter save runs, whichever path wrote the
+ * letter (the MCP tool or the dashboard's one-click letter): each number must
+ * come from the verified record, the profile, education or the posting, and
+ * must not be one the metrics register withholds.
+ */
+export async function checkLetterNumbers(store: Store, appId: string, markdown: string): Promise<LetterNumberCheck> {
+  const [experiences, education, profileRaw, snapshot, registerRaw] = await Promise.all([
+    loadExperiences(store),
+    loadEducation(store).catch(() => [] as string[]),
+    store.readFile(["profile.md"]),
+    readSnapshot(store, appId),
+    store.readFile(METRICS_REGISTER_PATH),
+  ]);
+  const posting = snapshotBody(snapshot);
+  const sources = [profileRaw ?? "", JSON.stringify(education), posting].join("\n");
+  const ungrounded = ungroundedNumbers(markdown, experiences, sources);
+  const allowed = allowedMetricStatuses(readProfileSettings(profileRaw));
+  const blocked = registerBlockedNumbers(markdown, registerRaw, allowed);
+  const parts: string[] = [];
+  if (ungrounded.length) {
+    parts.push(
+      `${ungrounded.length} number(s) in the letter are not in the user's verified record, profile, education or the posting: ${ungrounded.join(", ")}. ` +
+        `Remove them, or ask the user and record the fact first (save_confirmed_fact / save_metric).`,
+    );
+  }
+  if (blocked.length) {
+    parts.push(`${blocked.length} number(s) in the letter are withheld by the metrics register: ${describeMetricStatusIssues(blocked, allowed)}`);
+  }
+  return { ungrounded, blocked, message: parts.length ? `Not saved: ${parts.join(" ")}` : null };
+}
+
+/** The posting text of a snapshot, without its frontmatter (the raw text when the frontmatter does not parse). */
+function snapshotBody(snapshot: string | null): string {
+  if (!snapshot) return "";
+  try {
+    return matter(snapshot).content.trim();
+  } catch {
+    return snapshot.trim();
+  }
 }
 
 /** The profile's `name` (frontmatter), or undefined. */

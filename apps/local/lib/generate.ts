@@ -14,7 +14,7 @@ import {
   loadSummaryBlocks,
   loadRecruiterFeedback,
 } from "@kairos/engine/kb/store";
-import { saveGeneratedResume, saveScoredReport } from "@kairos/engine/tools/ops";
+import { checkLetterNumbers, saveGeneratedResume, saveScoredReport } from "@kairos/engine/tools/ops";
 import type { GeneratedResume } from "@kairos/engine/types";
 import { GENERATION_SYSTEM_PROMPT, buildGenerationUserMessage } from "@kairos/engine/prompts/generation";
 import { SCORING_SYSTEM_PROMPT, buildScoringUserMessage, profileFactsFrom } from "@kairos/engine/prompts/scoring";
@@ -23,7 +23,7 @@ import {
   buildCoverLetterUserMessage,
 } from "@kairos/engine/prompts/cover-letter";
 import { checkProse, hardProseViolations } from "@kairos/engine/tools/prose-checks";
-import { readProfileSettings } from "@kairos/engine/settings";
+import { loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import { markdownLetterToDocx } from "@kairos/engine/docx-render";
 import type { ScoreReport } from "@kairos/engine/types";
 
@@ -201,8 +201,9 @@ export async function generateCoverLetterHeadless(appId: string): Promise<{ ok: 
     date: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
   });
 
-  // Same prose gate as save_cover_letter; up to two rewrites with the exact
-  // phrases to fix before giving up (a letter that fails the gate is not saved).
+  // Same gates as save_cover_letter: the prose gate, then the number check
+  // (checkLetterNumbers, the function the MCP tool calls). Up to two rewrites
+  // with the exact findings before giving up: a letter that fails is not saved.
   const { voice } = readProfileSettings(await store.readFile(["profile.md"]));
   let prompt = `${COVER_LETTER_SYSTEM_PROMPT}\n\n${userMessage}\n\nReturn ONLY the letter as plain markdown. No commentary before or after.`;
   let markdown = "";
@@ -214,15 +215,21 @@ export async function generateCoverLetterHeadless(appId: string): Promise<{ ok: 
     }
     if (markdown.length < 200) return { ok: false, error: "Model returned an implausibly short letter; try again." };
     const hard = hardProseViolations(checkProse(markdown, { jobText: snapshotText(snapshot), voice }));
-    if (!hard.length) break;
-    if (attempt === 2) {
-      return { ok: false, error: `Letter failed the prose gate after 3 attempts: ${hard.map((v) => v.detail).join("; ")}` };
+    if (hard.length) {
+      if (attempt === 2) {
+        return { ok: false, error: `Letter failed the prose gate after 3 attempts: ${hard.map((v) => v.detail).join("; ")}` };
+      }
+      prompt = `${prompt}\n\nYour draft:\n${markdown}\n\nIt failed the prose gate. Rewrite it fixing every item below (keep the facts):\n${hard.map((v) => `- ${v.rule}: ${v.detail}`).join("\n")}\nReturn ONLY the letter.`;
+      continue;
     }
-    prompt = `${prompt}\n\nYour draft:\n${markdown}\n\nIt failed the prose gate. Rewrite it fixing every item below (keep the facts):\n${hard.map((v) => `- ${v.rule}: ${v.detail}`).join("\n")}\nReturn ONLY the letter.`;
+    const numbers = await checkLetterNumbers(store, appId, markdown);
+    if (!numbers.message) break;
+    if (attempt === 2) return { ok: false, error: `Letter failed the number check after 3 attempts. ${numbers.message}` };
+    prompt = `${prompt}\n\nYour draft:\n${markdown}\n\nIt failed the number check: ${numbers.message}\nRewrite it without those numbers (never replace one with another number that is not in the record). Return ONLY the letter.`;
   }
 
   await store.writeFile(["applications", appId, "cover-letter.md"], markdown);
-  const docx = await markdownLetterToDocx(markdown);
+  const docx = await markdownLetterToDocx(markdown, { template: { paper: await loadResumePaper(store) } });
   await store.writeBinary(
     ["applications", appId, "cover-letter.docx"],
     docx,

@@ -233,7 +233,7 @@ describe("bamboohr adapter (seventh ATS, 2026-10-13)", () => {
         ? jsonResponse({ result: { jobOpening: { datePosted: "2026-09-25" } } })
         : jsonResponse(list);
     }));
-    const r = await fetchBoardDetailed({ ats: "bamboohr", slug: "acmelabs" });
+    const r = await fetchBoardDetailed({ ats: "bamboohr", slug: "acmelabs" }, Date.now(), { dateWorthy: (title) => /product/i.test(title) });
     expect(r.failure).toBeUndefined();
     expect(r.postings).toHaveLength(2); // the id-less entry is dropped
     expect(r.postings[0]).toMatchObject({

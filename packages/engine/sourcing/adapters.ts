@@ -259,13 +259,34 @@ const WORKDAY_DETAIL_PARALLEL = 4;
 /** Postings per Workday list call: the cxs API answers 400 to anything above 20. */
 export const WORKDAY_PAGE = 20;
 /**
- * List pages per Workday board, daily lane: 200 postings. The "product"
- * search is full-text, so it matches most of a tenant's postings; one page
- * of 20 left out 55% of live boards' hits (2026-11-05). Half of the tenants
- * list newest first and stop well before the cap (see WORKDAY_ORDER_SLACK_DAYS);
- * the other half rank by relevance and page until the cap or their total.
+ * List pages per Workday board and search word, daily lane: 200 postings. The
+ * search is full-text, so a broad word matches most of a tenant's postings;
+ * one page of 20 left out 55% of live boards' hits (2026-11-05). Half of the
+ * tenants list newest first and stop well before the cap (see
+ * WORKDAY_ORDER_SLACK_DAYS); the other half rank by relevance and page until
+ * the cap or their total.
  */
 export const WORKDAY_MAX_PAGES = 10;
+/**
+ * Search words per Workday board. Each word is its own paged query, so the
+ * list calls per board are at most this many times the page cap.
+ */
+export const WORKDAY_MAX_SEARCH_TERMS = 3;
+
+/**
+ * The search texts one Workday board is queried with: the given words,
+ * trimmed, lowercased, without repeats, at most WORKDAY_MAX_SEARCH_TERMS.
+ * No words: one query with an empty search text, which lists the whole board
+ * (newest pages up to the page cap). No word is ever assumed.
+ */
+export function workdaySearchWords(terms: string[] | undefined): string[] {
+  const out: string[] = [];
+  for (const raw of terms ?? []) {
+    const t = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out.length ? out.slice(0, WORKDAY_MAX_SEARCH_TERMS) : [""];
+}
 /** List pages per Workday board, deep lane (no recency stop): 500 postings. */
 export const WORKDAY_MAX_PAGES_DEEP = 25;
 /**
@@ -325,62 +346,71 @@ async function fetchWorkday(composite: string, now: number, opts?: FetchOptions)
   const [tenant, wd, site] = composite.split("@");
   if (!tenant || !wd || !site) return [];
   const base = `https://${tenant}.${wd}.myworkdayjobs.com`;
-  const listPage = (offset: number) =>
+  const listPage = (searchText: string, offset: number) =>
     getJson(`${base}/wday/cxs/${tenant}/${site}/jobs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appliedFacets: {}, limit: WORKDAY_PAGE, offset, searchText: "product" }),
+      body: JSON.stringify({ appliedFacets: {}, limit: WORKDAY_PAGE, offset, searchText }),
     }) as Promise<{ total?: number; jobPostings?: WorkdayListRow[] } | null>;
 
-  // Page through the "product" search, 20 at a time. Observed 2026-11-05:
-  // only the first page carries the real `total` (later pages say 0), and an
-  // offset past the end returns page one again, so the first total bounds the
-  // paging and a page with nothing new ends it.
+  // One paged search per search word (the sweep passes the profile's; none
+  // means one unfiltered listing), 20 postings at a time; a posting found by
+  // two words is kept once. Observed 2026-11-05: only the first page carries
+  // the real `total` (later pages say 0), and an offset past the end returns
+  // page one again, so the first total bounds the paging and a page with
+  // nothing new for its word ends it.
   const maxPages = Math.max(1, opts?.workdayMaxPages ?? WORKDAY_MAX_PAGES);
   const jobs: WorkdayListRow[] = [];
   const seenPaths = new Set<string>();
-  let total = Infinity;
-  let newestFirst = true;
-  let oldestSoFar = -Infinity;
   let partial: AdapterPartial | undefined;
-  for (let page = 0; page < maxPages && page * WORKDAY_PAGE < total; page++) {
-    let data: Awaited<ReturnType<typeof listPage>>;
-    try {
-      data = await listPage(page * WORKDAY_PAGE);
-    } catch (err) {
-      if (page === 0) {
-        // Workday answers a removed career site with 422 and a disabled one
-        // with 403 "S22" (the site page itself redirects to a maintenance
-        // page). Both are registry decay, not a broken feed.
-        if (err instanceof BoardFetchError && err.kind === "http" && (err.status === 422 || (err.status === 403 && err.detail?.includes('"S22"')))) {
-          throw new BoardFetchError("gone", err.status);
+  words: for (const [w, word] of workdaySearchWords(opts?.searchTerms).entries()) {
+    const wordPaths = new Set<string>();
+    let total = Infinity;
+    let newestFirst = true;
+    let oldestSoFar = -Infinity;
+    for (let page = 0; page < maxPages && page * WORKDAY_PAGE < total; page++) {
+      let data: Awaited<ReturnType<typeof listPage>>;
+      try {
+        data = await listPage(word, page * WORKDAY_PAGE);
+      } catch (err) {
+        if (w === 0 && page === 0) {
+          // Workday answers a removed career site with 422 and a disabled one
+          // with 403 "S22" (the site page itself redirects to a maintenance
+          // page). Both are registry decay, not a broken feed.
+          if (err instanceof BoardFetchError && err.kind === "http" && (err.status === 422 || (err.status === 403 && err.detail?.includes('"S22"')))) {
+            throw new BoardFetchError("gone", err.status);
+          }
+          throw err;
         }
-        throw err;
+        // A later page or word failed: keep what was read before it, say so,
+        // and send this tenant nothing more.
+        partial = err instanceof BoardFetchError ? { kind: err.kind, status: err.status } : { kind: "network" };
+        break words;
       }
-      // A later page failed: keep what the earlier pages returned, say so.
-      partial = err instanceof BoardFetchError ? { kind: err.kind, status: err.status } : { kind: "network" };
-      break;
+      if (page === 0 && typeof data?.total === "number") total = data.total;
+      const pageRows = Array.isArray(data?.jobPostings) ? data.jobPostings : [];
+      let added = 0;
+      let freshest = Infinity;
+      for (const j of pageRows) {
+        if (!j?.title || !j.externalPath || wordPaths.has(j.externalPath)) continue;
+        wordPaths.add(j.externalPath);
+        added++;
+        if (!seenPaths.has(j.externalPath)) {
+          seenPaths.add(j.externalPath);
+          jobs.push(j);
+        }
+        const posted = parseWorkdayPostedOn(j.postedOn, now);
+        const age = posted === null ? null : ageDays(posted, now)!;
+        if (age === null) continue;
+        if (age < oldestSoFar - WORKDAY_ORDER_SLACK_DAYS) newestFirst = false;
+        oldestSoFar = Math.max(oldestSoFar, age);
+        freshest = Math.min(freshest, age);
+      }
+      if (added === 0 || pageRows.length < WORKDAY_PAGE) break;
+      // Newest-first list, and even this page's freshest posting is past the
+      // window: nothing further down can reach the board.
+      if (opts?.maxAgeDays !== undefined && newestFirst && freshest !== Infinity && freshest > opts.maxAgeDays + WORKDAY_ORDER_SLACK_DAYS) break;
     }
-    if (page === 0 && typeof data?.total === "number") total = data.total;
-    const pageRows = Array.isArray(data?.jobPostings) ? data.jobPostings : [];
-    let added = 0;
-    let freshest = Infinity;
-    for (const j of pageRows) {
-      if (!j?.title || !j.externalPath || seenPaths.has(j.externalPath)) continue;
-      seenPaths.add(j.externalPath);
-      jobs.push(j);
-      added++;
-      const posted = parseWorkdayPostedOn(j.postedOn, now);
-      const age = posted === null ? null : ageDays(posted, now)!;
-      if (age === null) continue;
-      if (age < oldestSoFar - WORKDAY_ORDER_SLACK_DAYS) newestFirst = false;
-      oldestSoFar = Math.max(oldestSoFar, age);
-      freshest = Math.min(freshest, age);
-    }
-    if (added === 0 || pageRows.length < WORKDAY_PAGE) break;
-    // Newest-first list, and even this page's freshest posting is past the
-    // window: nothing further down can reach the board.
-    if (opts?.maxAgeDays !== undefined && newestFirst && freshest !== Infinity && freshest > opts.maxAgeDays + WORKDAY_ORDER_SLACK_DAYS) break;
   }
 
   const rows = jobs.map((j) => {
@@ -405,8 +435,8 @@ async function fetchWorkday(composite: string, now: number, opts?: FetchOptions)
   });
 
   // Multi-city postings list as "N Locations", which no location gate can
-  // place: a Group PM role open in a primary city went to the stretch bucket
-  // (miss audit, 2026-11-05: 117 recent PM-titled postings). The detail
+  // place: a role open in a primary city went to the stretch bucket (miss
+  // audit, 2026-11-05: 117 recent postings with a target title). The detail
   // endpoint names the cities, and its startDate is the posting date to the
   // day ("30+ Days Ago" is all the list says past a month). Freshest postings
   // first, capped per board; a failed call keeps the placeholder.
@@ -490,14 +520,15 @@ async function fetchSmartRecruiters(slug: string, now: number): Promise<Posting[
 // list carries no posting date; only /careers/{id}/detail does. Boards are
 // small (typically a few dozen openings at most), but one detail call per
 // posting across the registry would multiply sweep requests, so the date is
-// fetched only for titles that could plausibly clear a function gate, a few
-// per board. Everything else ships undated (survives the recency gate, ranks
-// below dated postings).
+// fetched only for the titles the caller says are worth dating (the sweep
+// passes its function gate), a few per board. Everything else ships undated
+// (survives the recency gate, ranks below dated postings). Without that test
+// the first few postings of the board are dated, whatever their titles.
 
-const BAMBOO_DATE_WORTHY = /product|\bai\b|\bml\b|chief of staff|deployment|strateg|head of|forward deployed|solutions lead/i;
-const BAMBOO_MAX_DETAIL = 6;
+/** Posting-date detail calls per BambooHR board. */
+export const BAMBOO_MAX_DETAIL = 6;
 
-async function fetchBambooHr(slug: string, now: number): Promise<Posting[]> {
+async function fetchBambooHr(slug: string, now: number, opts?: FetchOptions): Promise<Posting[]> {
   const base = `https://${slug}.bamboohr.com/careers`;
   const data = (await getJson(`${base}/list`)) as {
     result?: {
@@ -517,7 +548,7 @@ async function fetchBambooHr(slug: string, now: number): Promise<Posting[]> {
   const dates = new Map<string, string | null>();
   await Promise.all(
     jobs
-      .filter((j) => BAMBOO_DATE_WORTHY.test(j.jobOpeningName!))
+      .filter((j) => opts?.dateWorthy?.(j.jobOpeningName!) ?? true)
       .slice(0, BAMBOO_MAX_DETAIL)
       .map(async (j) => {
         try {
@@ -568,8 +599,21 @@ export interface FetchOptions {
    * recency stop (deep scan), paging runs to the page cap or the list's end.
    */
   maxAgeDays?: number;
-  /** Workday list pages per board (default WORKDAY_MAX_PAGES). */
+  /** Workday list pages per board and search word (default WORKDAY_MAX_PAGES). */
   workdayMaxPages?: number;
+  /**
+   * Search words for job sites that only answer a search (Workday): one paged
+   * query per word, at most WORKDAY_MAX_SEARCH_TERMS, postings found twice
+   * kept once. The sweep passes the profile's (feedSearchTerms). Absent or
+   * empty: one unfiltered listing of the board.
+   */
+  searchTerms?: string[];
+  /**
+   * Which titles deserve the extra detail call that reads a posting date
+   * (BambooHR, whose list carries none), at most BAMBOO_MAX_DETAIL per board.
+   * The sweep passes its function gate. Absent: the first postings listed.
+   */
+  dateWorthy?: (title: string) => boolean;
 }
 
 /** A board read whose later pages failed: the postings are the pages read before. */

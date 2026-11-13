@@ -7,6 +7,7 @@
 
 import type { Store } from "@kairos/engine/store/types";
 import type { SearchProfile } from "./types";
+import { WORKDAY_MAX_SEARCH_TERMS } from "./adapters";
 import { dailyRun, maxSourcedCards } from "../settings";
 
 export const SEARCH_PROFILE_PATH = ["sourcing", "search-profile.json"];
@@ -33,14 +34,30 @@ const SENIORITY_VOCAB = [
   "vice president", "group", "chief", "manager",
 ];
 
+/** Single words that state a level, not a discipline. */
+const LEVEL_WORDS = new Set([...SENIORITY_VOCAB, "junior", "associate", "intern", "internship", "entry", "level", "graduate", "trainee"]);
+
 const DISCIPLINE_VOCAB = [
   "product", "engineering", "engineer", "design", "designer", "data",
   "marketing", "sales", "research", "operations", "finance", "security",
   "analytics", "science", "scientist",
 ];
 
-/** Generic noise no matter the discipline; refined per-user in conversation. */
-const DEFAULT_EXCLUDES = ["intern", "internship", "junior", "coordinator", "apprentice"];
+/**
+ * Early-career title words. Excluded by default only for a profile that
+ * states a senior level and no early-career one: a student or a new graduate
+ * is looking for exactly these. Refined per user in conversation.
+ */
+const EARLY_CAREER_EXCLUDES = ["intern", "internship", "junior", "apprentice"];
+/** Stated levels that make the early-career words noise. */
+const SENIOR_LEVEL = /\b(?:senior|principal|lead|director|head of|vp|vice president|chief)\b/;
+/** Stated levels (or target roles) that make them the target. */
+const EARLY_LEVEL = /\b(?:intern(?:ship)?s?|junior|entry|graduate|grad|apprentice(?:ship)?|trainee|student|associate|early career)\b/;
+
+/** Default exclude terms for the level the candidate states; none when no level is stated. */
+function defaultExcludes(levelText: string): string[] {
+  return SENIOR_LEVEL.test(levelText) && !EARLY_LEVEL.test(levelText) ? [...EARLY_CAREER_EXCLUDES] : [];
+}
 
 const norm = (s: string) => s.toLowerCase().trim();
 
@@ -57,10 +74,13 @@ export function deriveSearchProfile(
 
   const function_terms = DISCIPLINE_VOCAB.filter((d) => roleText.includes(d));
   if (function_terms.length === 0 && fm.target_roles?.length) {
-    // Unknown discipline: fall back to the meaningful words of the first target role.
-    function_terms.push(
-      ...norm(fm.target_roles[0]).split(/[^a-z]+/).filter((w) => w.length > 3),
-    );
+    // Unknown discipline: fall back to the meaningful words of the first
+    // target role. Level words are left out when anything else remains: with
+    // "senior" or "manager" as a function term, every senior or manager title
+    // of any profession would pass the gate.
+    const words = norm(fm.target_roles[0]).split(/[^a-z]+/).filter((w) => w.length > 3);
+    const roleWords = words.filter((w) => !LEVEL_WORDS.has(w));
+    function_terms.push(...(roleWords.length ? roleWords : words));
   }
 
   const seniority_terms = SENIORITY_VOCAB.filter((s) => seniorityText.includes(s));
@@ -76,8 +96,10 @@ export function deriveSearchProfile(
   const boost_terms = (fm.domains ?? []).map(norm);
 
   return {
-    function_terms: function_terms.length ? [...new Set(function_terms)] : ["product"],
-    exclude_terms: [...DEFAULT_EXCLUDES],
+    // No target roles: no function terms. Nothing is assumed; the sweep says
+    // that it has nothing to look for until the user names a role.
+    function_terms: [...new Set(function_terms)],
+    exclude_terms: defaultExcludes(seniorityText),
     locations,
     boost_terms,
     seniority_terms,
@@ -127,6 +149,29 @@ export async function updateSearchProfile(
   const next = mergeSearchProfile(await loadSearchProfile(s), update, now);
   await saveSearchProfile(s, next);
   return next;
+}
+
+/**
+ * The words sent to job sites that only answer a search (Workday), and the
+ * ones the cap left out. The profile's search_terms when it has any, else its
+ * function_terms; a function term that contains another one as whole words is
+ * skipped (a search for "engineer" already returns what "software engineer"
+ * would). At most WORKDAY_MAX_SEARCH_TERMS words, in the profile's order: each
+ * one is a paged query against every such board. Empty when the profile names
+ * no role at all.
+ */
+export function feedSearchTerms(p: Pick<SearchProfile, "function_terms" | "search_terms">): { terms: string[]; left_out: string[] } {
+  const clean = (list: string[] | undefined) => [
+    ...new Set((list ?? []).map((t) => (typeof t === "string" ? norm(t) : "")).filter(Boolean)),
+  ];
+  let words = clean(p.search_terms);
+  if (!words.length) {
+    const all = clean(p.function_terms);
+    const within = (long: string, short: string) =>
+      long !== short && new RegExp(`\\b${short.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(long);
+    words = all.filter((t) => !all.some((u) => within(t, u)));
+  }
+  return { terms: words.slice(0, WORKDAY_MAX_SEARCH_TERMS), left_out: words.slice(WORKDAY_MAX_SEARCH_TERMS) };
 }
 
 const money = (n: number, currency = "USD") =>

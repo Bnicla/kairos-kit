@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   dedupeRegistry,
+  harvestBase,
   parseRegistry,
   registryKey,
+  registryNeedsHarvest,
   registryStalenessWarning,
   resolveRegistry,
 } from "@kairos/engine/sourcing/registry-loader";
@@ -39,6 +41,37 @@ describe("registry loader (REQ-15)", () => {
   it("parseRegistry drops entries missing slug or ats", () => {
     const p = parseRegistry({ entries: [{ ats: "ashby", slug: "ok" }, { ats: "ashby" }, { slug: "x" }, null] });
     expect(p?.entries).toHaveLength(1);
+  });
+});
+
+// The refreshed list lives in the data folder; the tracked seed is never rewritten by the daily run.
+describe("harvest into the data folder", () => {
+  const at = (d: string) => new Date(d).getTime();
+
+  it("is due when the list in use is older than 30 days or undated", () => {
+    // No data copy: the seed (harvested 2026-08-01) is the list in use.
+    expect(registryNeedsHarvest(null, seed, at("2026-08-20"))).toBe(false);
+    expect(registryNeedsHarvest(null, seed, at("2026-09-15"))).toBe(true);
+    expect(registryNeedsHarvest(null, { entries: seed.entries }, at("2026-08-02"))).toBe(true);
+  });
+
+  it("is judged on the data copy once one exists, whatever the seed's age", () => {
+    const fresh = { harvested_at: "2026-09-10T00:00:00Z", entries: [{ ats: "ashby", slug: "fresh" }] };
+    expect(registryNeedsHarvest(fresh, seed, at("2026-09-15"))).toBe(false);
+    expect(registryNeedsHarvest(fresh, seed, at("2026-10-20"))).toBe(true);
+    // An unusable data copy does not count: the seed is the list in use.
+    expect(registryNeedsHarvest({ entries: [] }, seed, at("2026-08-20"))).toBe(false);
+  });
+
+  it("starts from the data copy's boards, then the boards only the seed has", () => {
+    const data = { entries: [{ ats: "smartrecruiters", slug: "Globex" }, { ats: "ashby", slug: "fresh" }] };
+    const seed2 = { entries: [{ ats: "greenhouse" as const, slug: "seedco" }, { ats: "smartrecruiters" as const, slug: "globex" }] };
+    expect(harvestBase(data, seed2)).toEqual([
+      { ats: "smartrecruiters", slug: "Globex" },
+      { ats: "ashby", slug: "fresh" },
+      { ats: "greenhouse", slug: "seedco" },
+    ]);
+    expect(harvestBase(null, seed2)).toEqual(seed2.entries);
   });
 });
 

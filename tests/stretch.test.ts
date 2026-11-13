@@ -52,6 +52,25 @@ const resume = (bullets: string[]): GeneratedResume => ({
 const run = (...bullets: string[]) => checkResumeStretch(resume(bullets), exps);
 
 describe("deniedPhrases", () => {
+  it("keeps a denial written on a fact line that has no tag", () => {
+    const untagged = parseExperience(
+      "globex-eng.md",
+      `---
+id: globex-eng
+company: Globex
+title: Software Engineer
+start: '2023'
+end: '2025'
+---
+
+## Achievements
+- Built the billing service with two other engineers. [R]
+- Never say "sole author of the billing service": it was a team of three.
+`,
+    );
+    expect(deniedPhrases([untagged])).toContain("sole author of the billing service");
+  });
+
   it("collects quoted phrases after do not / never, in the same sentence only", () => {
     expect(deniedPhrases(exps)).toEqual(["chose to build on nimbus", "drove build vs buy", "or it did not ship"]);
   });

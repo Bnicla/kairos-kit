@@ -38,7 +38,7 @@ import {
   readScoreReport,
   readResumeSource,
 } from "@kairos/engine/applications";
-import { saveScoredReport, saveGeneratedResume } from "@kairos/engine/tools/ops";
+import { saveScoredReport, saveGeneratedResume, checkLetterNumbers } from "@kairos/engine/tools/ops";
 import { fetchJobAd, ingestPastedText } from "@kairos/engine/ingest";
 import { fetchGreenhouseForm, formSummary, isWritingQuestion, saveApplicationForm } from "@kairos/engine/forms";
 import {
@@ -53,7 +53,7 @@ import {
 import { searchQA, upsertQA, readQA, loadQAIndex } from "@kairos/engine/qabank";
 import { INSIGHTS_SYSTEM_PROMPT, buildInsightsUserMessage } from "@kairos/engine/prompts/insights";
 import { ENRICHMENT_SYSTEM_PROMPT, buildEnrichmentUserMessage } from "@kairos/engine/prompts/enrichment";
-import { serializeExperience, insertUnderSection, stripUnverified } from "@kairos/engine/kb/experience";
+import { serializeExperience, insertUnderSection, stripUnverified, untaggedFacts } from "@kairos/engine/kb/experience";
 import { computeHealth } from "@kairos/engine/health";
 import {
   SCORING_SYSTEM_PROMPT,
@@ -75,7 +75,7 @@ import {
 import { generatedResumeToMarkdown, markdownResumeToHtml } from "@kairos/engine/resume-render";
 import { markdownResumeToDocx, markdownLetterToDocx } from "@kairos/engine/docx-render";
 import { checkProse, hardProseViolations } from "@kairos/engine/tools/prose-checks";
-import { readProfileSettings } from "@kairos/engine/settings";
+import { loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import { listTracks, resolveTrack, saveTrack, trackGuidance, TrackStatus, EvidenceMapItem, MAIN_TRACK_ID, MAX_ACTIVE_TRACKS } from "@kairos/engine/tracks";
 import { saveProfileShape, saveSearchProfileShape, saveAutofillShape } from "./schemas";
 import { SETUP_SECTIONS, sectionByName } from "@kairos/engine/setup/sections";
@@ -513,7 +513,7 @@ server.registerTool(
   {
     title: "Save an experience file",
     description:
-      "Persist one knowledge-base experience (frontmatter + provenance-tagged markdown body). Every fact must carry [R]/[C]/[F]; [?] notes are allowed only in a 'Raw material / notes' holding pen. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
+      "Persist one knowledge-base experience (frontmatter + provenance-tagged markdown body). Every fact must carry [R]/[C]/[F]; [?] notes are allowed only in a 'Raw material / notes' holding pen. A fact line with no tag is saved but is not used as evidence: the result lists each one in untagged_facts, so ask the user to confirm it (then tag it [C]) or mark it [?], and save again. Claude Code asks the user to approve the change first; if they decline, nothing is saved and you should not retry unless they ask.",
     inputSchema: {
       fileName: z.string().describe("e.g. 01-acme-data-intern.md"),
       frontmatter: z.record(z.string(), z.any()).describe("Experience frontmatter object"),
@@ -551,7 +551,21 @@ server.registerTool(
       frontmatter: fm as never,
       body,
     });
-    return ok({ ok: true, saved: `knowledge-base/experiences/${fileName}`, replaced: Boolean(existing), sources: merged });
+    // Facts with no provenance tag are kept in the file but left out of the
+    // evidence (stripUnverified): name them so the user can confirm or tag them.
+    const untagged = untaggedFacts(body);
+    return ok({
+      ok: true,
+      saved: `knowledge-base/experiences/${fileName}`,
+      replaced: Boolean(existing),
+      sources: merged,
+      ...(untagged.length
+        ? {
+            untagged_facts: untagged,
+            untagged_note: `${untagged.length} fact line(s) carry no provenance tag and are not used as evidence until tagged. Ask the user about each one: tag it [C] once they confirm it ([R] if it comes from one of their documents), or [?] if it is unverified, then save again.`,
+          }
+        : {}),
+    });
   }),
 );
 
@@ -1392,7 +1406,7 @@ server.registerTool(
   {
     title: "Save a generated resume",
     description:
-      "Persist the GeneratedResume JSON you produced. Writes the structured resume (with provenance_audit and requirement_coverage), an editable markdown source, the resume.docx/.pdf masters, and submit-ready copies named <Candidate_Name>-<company>-resume.pdf/.docx (listed in submit_files: point the user to those, never to resume.pdf). Updates status to 'drafted'. Each covered/partial requirement_coverage row must quote text that is on the résumé, or the save is rejected naming the row. A phrasing the knowledge base explicitly forbids (a quoted 'never say' line) rejects the save. The result's requirement_coverage gives counts by status and the gap list: report the gaps to the user. The result's stretch_check lists bullets whose ownership verb or absolute word (chose, drove, owned, mandatory, every, the first...) no verified fact of that employer supports: ask the user keep / soften / drop for each, save a 'keep' with save_confirmed_fact, and re-save after soften/drop.",
+      "Persist the GeneratedResume JSON you produced. Writes the structured resume (with provenance_audit and requirement_coverage), an editable markdown source, the resume.docx/.pdf masters, and submit-ready copies named <Candidate_Name>-<company>-resume.pdf/.docx (listed in submit_files: point the user to those, never to resume.pdf). Updates status to 'drafted'. Each covered/partial requirement_coverage row must quote text that is on the résumé, or the save is rejected naming the row. A phrasing the knowledge base explicitly forbids (a quoted 'never say' line) rejects the save. A number that matches a metrics-register entry whose status is not allowed in documents (by default anything other than DEFENDED or SCOPE) rejects the save naming the entry. The .docx is rendered on the paper in the result's `paper` (profile.md `paper: letter | a4`; unset: US Letter for a United States search, A4 when the search includes other countries). The result's requirement_coverage gives counts by status and the gap list: report the gaps to the user. The result's stretch_check lists bullets whose ownership verb or absolute word (chose, drove, owned, mandatory, every, the first...) no verified fact of that employer supports: ask the user keep / soften / drop for each, save a 'keep' with save_confirmed_fact, and re-save after soften/drop.",
     inputSchema: {
       appId: z.string(),
       resume: z.record(z.string(), z.any()).describe("The full GeneratedResume JSON (incl. provenance_audit)"),
@@ -1417,6 +1431,7 @@ server.registerTool(
       ok: true,
       appId,
       pdf_rendered: !!pdf,
+      paper: result.paper,
       submit_files: submitFiles,
       provenance_audit_entries: result.provenanceEntries,
       ats_coverage: `${(result.ats.coverage * 100).toFixed(0)}%`,
@@ -1482,7 +1497,7 @@ server.registerTool(
   {
     title: "Save a cover letter",
     description:
-      "Persist the cover letter (markdown) you wrote. Runs the anti-slop prose gate first: hard violations (attention hooks, reveal set-ups, mic-drop one-liners, stock closers, banned words, em dashes) reject the save with the exact phrases to fix; soft ones come back as warnings. Every number in the letter must appear in the verified record, the profile, education or the posting, or the save is rejected naming it. Writes cover-letter.md and a business-letter cover-letter.docx (+ .pdf).",
+      "Persist the cover letter (markdown) you wrote. Runs the anti-slop prose gate first: hard violations (attention hooks, reveal set-ups, mic-drop one-liners, stock closers, banned words, em dashes) reject the save with the exact phrases to fix; soft ones come back as warnings. Every number in the letter must appear in the verified record, the profile, education or the posting, and must not be one the metrics register withholds (by default any status other than DEFENDED or SCOPE), or the save is rejected naming it. Writes cover-letter.md and a business-letter cover-letter.docx (+ .pdf).",
     inputSchema: { appId: z.string(), markdown: z.string() },
   },
   guard(async ({ appId, markdown }) => {
@@ -1497,19 +1512,14 @@ server.registerTool(
           hard.map((v) => `- ${v.rule}: ${v.detail}`).join("\n"),
       );
     }
-    // Numbers: each must come from the verified record, the profile, education or the posting.
-    const { ungroundedNumbers } = await import("@kairos/engine/tools/checks");
-    const [exps, edu, profileRaw] = await Promise.all([loadExperiences(store), loadEducation(store).catch(() => []), store.readFile(["profile.md"])]);
-    const sources = [profileRaw ?? "", JSON.stringify(edu), snapshotText(await readSnapshot(store, appId)) ?? ""].join("\n");
-    const unknown = ungroundedNumbers(markdown, exps, sources);
-    if (unknown.length) {
-      return fail(
-        `Not saved: ${unknown.length} number(s) in the letter are not in the user's verified record, profile, education or the posting: ${unknown.join(", ")}. Remove them, or ask the user and record the fact first (save_confirmed_fact / save_metric).`,
-      );
-    }
+    // Numbers: each must come from the verified record, the profile, education
+    // or the posting, and must not be withheld by the metrics register. The
+    // dashboard's one-click letter runs the same function.
+    const numbers = await checkLetterNumbers(store, appId, markdown);
+    if (numbers.message) return fail(numbers.message);
     const warnings = violations.map((v) => `${v.rule}: ${v.detail}`);
     await store.writeFile(["applications", appId, "cover-letter.md"], markdown);
-    const docx = await markdownLetterToDocx(markdown);
+    const docx = await markdownLetterToDocx(markdown, { template: { paper: await loadResumePaper(store) } });
     await store.writeBinary(
       ["applications", appId, "cover-letter.docx"],
       docx,
@@ -1559,7 +1569,8 @@ server.registerTool(
     if (!md) return fail("No resume to render — call save_resume first.");
     const profile = await readProfile();
     const headline = typeof profile.headline === "string" ? profile.headline : undefined;
-    const docx = await markdownResumeToDocx(md, { headline });
+    const paper = await loadResumePaper(store);
+    const docx = await markdownResumeToDocx(md, { headline, template: { paper } });
     const path = await store.writeBinary(
       ["applications", appId, "resume.docx"],
       docx,
@@ -1568,7 +1579,7 @@ server.registerTool(
     // Keep the submit-ready PDF in lockstep with the docx (best-effort).
     const { renderDocxToPdf } = await import("@/lib/pdf-render");
     const pdf = await renderDocxToPdf(`${kairosHome()}/applications/${appId}/resume.docx`);
-    return ok({ ok: true, docxPath: path, pdf_rendered: !!pdf });
+    return ok({ ok: true, docxPath: path, paper, pdf_rendered: !!pdf });
   }),
 );
 
@@ -1591,7 +1602,7 @@ server.registerTool(
     const faithful = await renderDocxToPdf(docxPath);
     const appDir = `${kairosHome()}/applications/${appId}`;
     if (faithful) return ok({ ok: true, pdfPath: faithful, source: "docx", submit_files: await writeSubmissionCopies(appDir) });
-    const pdf = await htmlToPdf(markdownResumeToHtml(md));
+    const pdf = await htmlToPdf(markdownResumeToHtml(md), await loadResumePaper(store));
     const path = await store.writeBinary(["applications", appId, "resume.pdf"], pdf, "application/pdf");
     return ok({ ok: true, pdfPath: path, source: "html-template", submit_files: await writeSubmissionCopies(appDir) });
   }),

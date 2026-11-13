@@ -367,6 +367,9 @@ describe("location markers: short ones match whole words only", () => {
   });
 });
 
+// The override is profile data (role_phrases + soft_exclude_terms). This
+// product-manager demo profile carries the values that used to be hard-coded
+// in filter.ts, so the titles below prove the old behaviour is reproducible.
 describe("exclude-term override on explicit product-management titles (miss audit, 2026-11-05)", () => {
   const p: SearchProfile = {
     ...profile,
@@ -375,6 +378,13 @@ describe("exclude-term override on explicit product-management titles (miss audi
       "sales", "support", "engineer", "account", "analyst", "scientist", "researcher", "writer", "coordinator",
       "ads", "ad tech", "adtech", "crypto", "web3", "intern", "junior", "associate product", "designer",
       "product marketing", "marketing manager", "product owner", "counsel",
+    ],
+    soft_exclude_terms: ["sales", "support", "engineer", "account", "analyst", "scientist", "researcher", "writer", "coordinator"],
+    role_phrases: [
+      "product manager", "product managers", "product management", "head of product",
+      "director of product", "director, product", "director product",
+      "vp of product", "vp, product", "vp product",
+      "group product", "principal product", "product lead",
     ],
   };
   const gate = (title: string) => functionGateVerdict(title, p);
@@ -428,10 +438,17 @@ describe("exclude-term override on explicit product-management titles (miss audi
     expect(gate("Sales Engineer")).toBe("no_function_term");
   });
 
-  it("never overrides on product marketing / product owner / associate / designer titles, even when the profile lacks that term", () => {
-    const loose: SearchProfile = { ...p, exclude_terms: ["sales"] };
+  it("a hard exclude term on the title blocks it whatever the soft terms say; nothing is excluded that the profile does not list", () => {
+    const loose: SearchProfile = { ...p, exclude_terms: ["sales", "designer"] };
     expect(functionGateVerdict("Product Manager / Designer, Sales Tools", loose)).toBe("exclude_term");
     expect(functionGateVerdict("Product Manager, Sales Tools", loose)).toBe("pass");
+    // "designer" is no longer blocked by the code itself: it is the profile's to list.
+    expect(functionGateVerdict("Product Manager / Designer, Sales Tools", { ...p, exclude_terms: ["sales"] })).toBe("pass");
+  });
+
+  it("without role phrases or soft terms in the profile, every exclude term blocks", () => {
+    expect(functionGateVerdict("Senior Product Manager, AI Sales Platform", { ...p, soft_exclude_terms: undefined })).toBe("exclude_term");
+    expect(functionGateVerdict("Senior Product Manager, AI Sales Platform", { ...p, role_phrases: [] })).toBe("exclude_term");
   });
 
   it("the prefilter applies it: the three audit titles reach the survivors", () => {

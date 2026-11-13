@@ -147,9 +147,12 @@ function buildResume(extraDrops: [string, string][]): any {
 }
 
 let stretch: { company: string; trigger: string; detail: string; bullet: string }[] = [];
+// Paper the résumé was rendered on: profile.md `paper`, else by the search
+// (settings.resumePaper). saveGeneratedResume resolves it and reports it.
+let paper: string | undefined;
 
 async function renderAndProbe(g: any) {
-  stretch = (await saveGeneratedResume(store, spec.appId, g, HEADLINE ? { headline: HEADLINE } : {})).stretch;
+  ({ stretch, paper } = await saveGeneratedResume(store, spec.appId, g, HEADLINE ? { headline: HEADLINE } : {}));
   await renderDocxToPdf(join(HOME, "applications", spec.appId, "resume.docx"));
   return probeResumeLayout(join(HOME, "applications", spec.appId, "resume.docx"), { page2Anchor: anchor });
 }
@@ -176,5 +179,5 @@ while (rounds < 6) {
   probe = await renderAndProbe(buildResume(applied));
 }
 
-console.log(JSON.stringify({ appId: spec.appId, verdict: probe.verdict, pages: probe.pages, page2Start: probe.page2Start, fitDrops: applied, guidance: probe.guidance ?? null, stretch_check: stretch.map(({ company, trigger, detail, bullet }) => ({ company, trigger, why: detail, bullet })) }, null, 1));
+console.log(JSON.stringify({ appId: spec.appId, paper, verdict: probe.verdict, pages: probe.pages, page2Start: probe.page2Start, fitDrops: applied, guidance: probe.guidance ?? null, stretch_check: stretch.map(({ company, trigger, detail, bullet }) => ({ company, trigger, why: detail, bullet })) }, null, 1));
 if (probe.verdict !== "good") process.exit(2);

@@ -1,20 +1,45 @@
 /**
  * Registry harvester (spec §4): query the Common Crawl URL index (free public
- * dataset) for the fixed URL shapes of the five ATSs, extract board slugs, and
- * emit packages/engine/sourcing/registry.json. No paid intermediaries — the
- * only external dependency is the nonprofit Common Crawl index; validation
- * happens implicitly at sweep time against the ATS feeds themselves.
+ * dataset) for the fixed URL shapes of the supported ATSs, extract board slugs,
+ * and write the refreshed board list to the data folder
+ * ($KAIROS_HOME/sourcing/registry.json), where the sweep reads it first. The
+ * tracked list (packages/engine/sourcing/registry.json) is the starting point
+ * and the fallback; this script does not change it, so a refresh leaves the
+ * checkout unmodified. No paid intermediaries — the only external dependency
+ * is the nonprofit Common Crawl index; validation happens implicitly at sweep
+ * time against the ATS feeds themselves.
  *
- *   npm -w kairos-local run harvest-registry              (sampled, fast)
- *   npm -w kairos-local run harvest-registry -- --pages 60 (more coverage)
+ *   npm -w kairos-local run harvest-registry               (only when the list in use is over 30 days old)
+ *   npm -w kairos-local run harvest-registry -- --force    (harvest now)
+ *   npm -w kairos-local run harvest-registry -- --pages 60 (more coverage; harvests now)
+ *   npm -w kairos-local run harvest-registry -- --only bamboohr (one ATS; harvests now)
+ *   npm -w kairos-local run harvest-registry -- --seed     (maintainers: rewrite the tracked list instead)
  */
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { isNonPublicBoard, registryKey } from "@kairos/engine/sourcing/registry-loader";
+import { harvestBase, isNonPublicBoard, registryKey, registryNeedsHarvest, REGISTRY_STALE_DAYS, type RegistryFile } from "@kairos/engine/sourcing/registry-loader";
+import { kairosHome } from "../../local/store/local-fs";
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/sourcing/registry.json");
+const SEED = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/sourcing/registry.json");
+const TO_SEED = process.argv.includes("--seed");
+const OUT = TO_SEED ? SEED : join(kairosHome(), "sourcing", "registry.json");
 const MAX_PAGES_PER_PATTERN = parseInt(process.argv[process.argv.indexOf("--pages") + 1] || "24", 10) || 24;
+
+const readJson = (p: string): unknown => {
+  try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; }
+};
+const seed = JSON.parse(readFileSync(SEED, "utf8")) as RegistryFile;
+const dataCopy = TO_SEED ? null : readJson(OUT);
+
+// The daily scripts call this every day (or whenever the tracked file's date is
+// over 30 days old, which stays true once it is). The decision is made here,
+// from the harvest date of the list the sweep would use.
+const ASKED = ["--force", "--seed", "--only", "--pages"].some((f) => process.argv.includes(f));
+if (!ASKED && !registryNeedsHarvest(dataCopy, seed)) {
+  console.log(`▸ The job-board list in use was harvested within the last ${REGISTRY_STALE_DAYS} days; nothing to do (--force harvests anyway)`);
+  process.exit(0);
+}
 
 interface Pattern {
   ats: "greenhouse" | "lever" | "ashby" | "rippling" | "workday" | "smartrecruiters" | "bamboohr";
@@ -146,13 +171,8 @@ const crawl = await latestCrawl();
 console.log(`▸ Using crawl ${crawl}; up to ${MAX_PAGES_PER_PATTERN} index pages per pattern`);
 
 const registry = new Map<string, { ats: string; slug: string }>();
-if (existsSync(OUT)) {
-  for (const e of JSON.parse(readFileSync(OUT, "utf8")).entries as { ats: string; slug: string }[]) {
-    const key = regKey(e.ats, e.slug);
-    if (!registry.has(key)) registry.set(key, e);
-  }
-  console.log(`▸ Merging into existing registry (${registry.size} entries)`);
-}
+for (const e of harvestBase(dataCopy, seed)) registry.set(regKey(e.ats, e.slug), e);
+console.log(`▸ Merging into existing registry (${registry.size} entries)`);
 
 for (const pattern of PATTERNS) {
   if (ONLY && pattern.ats !== ONLY) continue;
@@ -179,6 +199,7 @@ for (const pattern of PATTERNS) {
 }
 
 const entries = [...registry.values()].filter((e) => !isNonPublicBoard(e)).sort((a, b) => `${a.ats}:${a.slug}`.localeCompare(`${b.ats}:${b.slug}`));
+mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify({ version: 1, harvested_at: new Date().toISOString(), crawl, entries }, null, 1));
 const byAts = entries.reduce<Record<string, number>>((acc, e) => ((acc[e.ats] = (acc[e.ats] ?? 0) + 1), acc), {});
-console.log(`✓ registry.json: ${entries.length} boards`, byAts);
+console.log(`✓ ${OUT}: ${entries.length} boards`, byAts);

@@ -37,13 +37,15 @@ setting the engine reads has no section and no stated default.
 | `profile.preferences.remote` | profile.md | 8. places | Not stated. | Read by triage through the profile summary. |
 | `profile.preferences.relocation` | profile.md | 8. places | Not stated. | Given to scoring as a profile fact. |
 | `profile.preferences.pay_floor` | profile.md | 9. pay | Not stated. | Read by triage through the profile summary; the structured floor is search_profile.pay_floor. |
-| `profile.target_roles` | profile.md | 5. goals | None: the search falls back to 'product'. | Enrichment questions; seeds function terms; triage summary. |
+| `profile.target_roles` | profile.md | 5. goals | None: the search has nothing to look for until a role is named. | Enrichment questions; seeds function terms; triage summary. |
 | `profile.target_seniority` | profile.md | 6. level | Any level. | Seeds seniority terms; triage summary. |
 | `profile.role_shape_preference` | profile.md | 6. level | None. | Copied into the search profile notes on first derivation. |
 | `profile.domains` | profile.md | 5. goals | None. | Seeds boost terms; triage summary. |
 | `profile.deal_breakers` | profile.md | 7. dealbreakers | None. | Triage summary (the hard gates are in the search profile). |
 | `profile.target_pages` | profile.md | 12. resume | Derived from years of experience (1 page for students). | Résumé length policy and layout check. |
 | `profile.resume_page2_anchor` | profile.md | 12. resume | No anchor: any clean page break passes. | Layout check on two-page résumés. |
+| `profile.paper` | profile.md | not asked | US Letter for a United States search; A4 when search_profile.international_ok is true. | Paper size of the résumé and cover letter (letter or a4). |
+| `profile.metrics_allowed_statuses` | profile.md | not asked | DEFENDED and SCOPE. | Metrics-register statuses whose numbers may appear in a résumé or letter. |
 | `profile.standing_base_app` | profile.md | not asked | None until the first tailored résumé; tailor-resume asks for spec.base. | Base résumé for tailor-resume when a spec names none. |
 | `profile.resume_leadin_aliases` | profile.md | not asked | {} (nothing renamed yet). | Maps renamed bullet lead-ins so old tailoring specs keep matching. |
 | `profile.stories_map` | profile.md | not asked | knowledge-base/stories-map.json. | Data-folder path of the stories map the deep-dives page reads. |
@@ -51,7 +53,10 @@ setting the engine reads has no section and no stated default.
 | `profile.voice.banned_patterns` | profile.md | 11. voice | Built-in phrase list only. | Letter and answer prose check. |
 | `profile.voice.replace_default_patterns` | profile.md | 11. voice | false (the user's list extends the built-in one). | true: the user's list replaces the built-in one. |
 | `search_profile.function_terms` | sourcing/search-profile.json | 5. goals | Derived from target_roles. | Hard gate: a title must contain one of these words. |
-| `search_profile.exclude_terms` | sourcing/search-profile.json | 7. dealbreakers | intern, internship, junior, coordinator, apprentice (change them for internship searches). | Hard gate: titles with these words are dropped. |
+| `search_profile.exclude_terms` | sourcing/search-profile.json | 7. dealbreakers | None; intern, internship, junior and apprentice when the stated level is senior and not early-career. | Hard gate: titles with these words are dropped. |
+| `search_profile.search_terms` | sourcing/search-profile.json | not asked | The first function terms. | Words sent as the search text to job sites that only answer a search (Workday): one paged query per word, at most 3. |
+| `search_profile.role_phrases` | sourcing/search-profile.json | not asked | None: every exclude term blocks. | Phrases that name the user's own role in a title; read only with soft_exclude_terms. |
+| `search_profile.soft_exclude_terms` | sourcing/search-profile.json | not asked | None: every exclude term blocks. | Exclude terms that do not block a title carrying a role phrase in another part of the title. |
 | `search_profile.locations` | sourcing/search-profile.json | 8. places | Derived from preferences.location; remote postings always match. | Places that count as local; others go to the stretch bucket. |
 | `search_profile.secondary_locations` | sourcing/search-profile.json | 8. places | None. | Higher-bar places (strong fits only), may be abroad. |
 | `search_profile.excluded_locations` | sourcing/search-profile.json | 8. places | None. | Hard gate: onsite/hybrid postings there are dropped. |

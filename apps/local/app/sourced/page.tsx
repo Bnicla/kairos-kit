@@ -147,7 +147,7 @@ export default async function SourcedPage() {
           <div className="font-semibold" style={{ color: "var(--danger-fg)" }}>⚠ Triage didn’t run — this list is unranked</div>
           <p className="text-muted mt-1">
             The model triage step failed ({run.triage_error}), so roles are shown in mechanical rank order, not by fit —
-            priority roles like Chief of Staff and Group PM may be buried in “Filtered out” below.
+            the roles that fit you best may be buried in “Filtered out” below.
             {/oauth|auth|expired|authenticate/i.test(run.triage_error) && (
               <> Fix: run <code className="rounded bg-[var(--border)] px-1">claude setup-token</code> in a terminal, then re-run the sweep.</>
             )}

@@ -33,7 +33,13 @@ if (!plan.fetchable.length && !plan.browser.length) {
   console.log("▸ Dream watch: no dream_companies in the search profile. Add some to have their career sites checked daily.");
   process.exit(0);
 }
-const SOURCES: [string, () => Promise<DreamJob[]>][] = plan.fetchable.map((c) => [c.name, () => fetchDreamCompany(c, profile)]);
+// The function gate below keeps only titles with one of the profile's function
+// terms. With none, every posting would be dropped without a word.
+if (!(profile.function_terms ?? []).some((t) => t.trim())) {
+  console.error("▸ Dream watch: the search profile names no target role (function_terms is empty), so no posting can match. Add the roles you are looking for, then run it again.");
+  process.exit(0);
+}
+const SOURCES:[string, () => Promise<DreamJob[]>][] = plan.fetchable.map((c) => [c.name, () => fetchDreamCompany(c, profile)]);
 
 // --- Run ----------------------------------------------------------------------
 const seenPath = join(OUT_DIR, "dream-seen.json");

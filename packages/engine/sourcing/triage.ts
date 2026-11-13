@@ -84,7 +84,7 @@ export function buildTriagePrompt(
   const rules = triageRules?.length
     ? `\nCANDIDATE RULES (hard constraints, override your general judgment):\n${triageRules.map((r) => `- ${r}`).join("\n")}\n`
     : "";
-  return `You are triaging freshly posted jobs for a candidate. Judge each posting from its title/company/location ONLY (no fetching). SHORTLIST postings whose role plausibly fits the candidate's function, seniority and domains; SKIP clear mismatches (wrong function like marketing/recruiting/engineering-IC, wrong seniority direction, irrelevant domain). guess_band is a rough fit guess: STRONG / COMPETITIVE / DEVELOPING / WEAK — it is a pre-screen guess, not a score. one_liner: max 12 words, why it fits (or the main caveat). Be selective: a student should see a short list worth their time, not everything.
+  return `You are triaging freshly posted jobs for a candidate. Judge each posting from its title/company/location ONLY (no fetching). SHORTLIST postings whose role plausibly fits the candidate's function, seniority and domains; SKIP clear mismatches (a function other than the candidate's own, wrong seniority direction, irrelevant domain). guess_band is a rough fit guess: STRONG / COMPETITIVE / DEVELOPING / WEAK — it is a pre-screen guess, not a score. one_liner: max 12 words, why it fits (or the main caveat). Be selective: a student should see a short list worth their time, not everything.
 
 CANDIDATE:
 ${candidateSummary}

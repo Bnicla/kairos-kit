@@ -70,54 +70,56 @@ const placeHas = (loc: string, marker: string) => {
 };
 
 /**
- * Exclude terms that name a function a product manager may work FOR ("AI
- * Sales Platform", "Unified Support", "ex-product engineer"), as opposed to
- * a domain the user rules out (ads, crypto) or a role/level that is never a
- * fit (intern, designer, product marketing, counsel). On a title with an
- * explicit product-management phrase these do not exclude: the miss audit of
- * 2026-11-05 found "Senior Product Manager, AI Sales Platform" blocked by
- * "sales" and "Sr Principal, Product Manager - Unified Support & AI
- * Experience" blocked by "support". Hard-coded on purpose: the profile's
- * exclude_terms stay one flat list, and every term not named here keeps
- * blocking unconditionally.
- */
-const FUNCTION_OVERRIDE_TERMS = new Set([
-  "sales", "support", "engineer", "account", "analyst", "scientist", "researcher", "writer", "coordinator",
-]);
-const EXPLICIT_PM_PHRASE =
-  /\bproduct manag\w*|\bhead of product\b|\bdirector,? (?:of )?product\b|\bgroup product\b|\bprincipal product\b|\bproduct lead\b|\bvp,? (?:of )?product\b/gi;
-/** Titles that never get the override, whatever else they say. */
-const NEVER_OVERRIDDEN = /\bproduct marketing\b|\bmarketing manager\b|\bproduct owner\b|\bassociate product\b|\bdesigner\b/i;
-/**
+ * Soft exclude terms. Some exclude terms name something the user's role may
+ * work FOR ("Software Engineer, Sales Platform", "Product Manager - Unified
+ * Support"), as opposed to a domain the user rules out or a role or level
+ * that is never a fit. The profile marks those in soft_exclude_terms and
+ * names the user's own role in role_phrases; on a title that carries a role
+ * phrase, a soft term does not exclude when it sits in another part of the
+ * title. The miss audit of 2026-11-05 found titles of that shape blocked by
+ * "sales" and "support". Both lists are the user's: with either one empty,
+ * and for every exclude term not marked soft, the term blocks
+ * unconditionally.
+ *
  * Title parts: the override needs the excluded word in a different part from
- * the PM phrase, so "Product Manager, AI Sales Platform" passes while "Head of
- * Product Support" and "Principal Product Engineer" (one part: the role IS
- * support or engineering) stay excluded.
+ * the role phrase, so "Software Engineer, Sales Platform" passes while "Sales
+ * Software Engineer" and "Software Engineer in Sales" (one part: the role IS
+ * in sales) stay excluded.
  */
 const TITLE_PART_BREAK = /[,|:;/()[\]–—-]/g;
 
 /** Index of the title part (split on punctuation) that holds character `at`. */
 const partAt = (title: string, at: number): number => (title.slice(0, at).match(TITLE_PART_BREAK) ?? []).length;
 
-function excludeOverridden(title: string, term: string): boolean {
-  if (!FUNCTION_OVERRIDE_TERMS.has(norm(term).trim())) return false;
-  if (NEVER_OVERRIDDEN.test(title)) return false;
-  const pmParts = new Set([...title.matchAll(EXPLICIT_PM_PHRASE)].map((m) => partAt(title, m.index! + m[0].length - 1)));
-  if (pmParts.size === 0) return false;
-  return [...title.matchAll(termPattern(term, "gi"))].every((m) => !pmParts.has(partAt(title, m.index!)));
+function excludeOverridden(title: string, term: string, profile: SearchProfile): boolean {
+  const soft = profile.soft_exclude_terms;
+  const phrases = profile.role_phrases;
+  if (!soft?.length || !phrases?.length) return false;
+  const t = norm(term).trim();
+  if (!soft.some((s) => norm(s).trim() === t)) return false;
+  // The part each role phrase ends in ("Director, Engineering" ends after the comma).
+  const roleParts = new Set<number>();
+  for (const phrase of phrases) {
+    const ph = phrase.trim();
+    if (!ph) continue;
+    for (const m of title.matchAll(termPattern(ph, "gi"))) roleParts.add(partAt(title, m.index! + m[0].length - 1));
+  }
+  if (roleParts.size === 0) return false;
+  return [...title.matchAll(termPattern(term, "gi"))].every((m) => !roleParts.has(partAt(title, m.index!)));
 }
 
 export type FunctionGateVerdict = "pass" | "no_function_term" | "exclude_term";
 
 /**
  * The function gate, with its reason. A title needs a function term; a title
- * that has one is then blocked by any exclude term, except the function-type
- * terms above on an explicit product-management title. "exclude_term" means
- * an exclude term cut a title the function terms would have kept.
+ * that has one is then blocked by any exclude term, except a soft exclude
+ * term on a title that names the user's role in another part (above).
+ * "exclude_term" means an exclude term cut a title the function terms would
+ * have kept.
  */
 export function functionGateVerdict(title: string, profile: SearchProfile): FunctionGateVerdict {
   if (!profile.function_terms.some((f) => hasWord(title, f))) return "no_function_term";
-  const blocked = profile.exclude_terms.some((x) => hasWord(title, x) && !excludeOverridden(title, x));
+  const blocked = profile.exclude_terms.some((x) => hasWord(title, x) && !excludeOverridden(title, x, profile));
   return blocked ? "exclude_term" : "pass";
 }
 

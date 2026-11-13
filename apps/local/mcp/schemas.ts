@@ -41,6 +41,14 @@ export const saveProfileShape = {
     .string()
     .optional()
     .describe("Two-page résumés: a title substring of the role that must open page 2 (the layout check flags a bad break otherwise)"),
+  paper: z
+    .enum(["letter", "a4"])
+    .optional()
+    .describe("Paper size of the résumé and cover letter. Omit for US Letter on a United States search and A4 otherwise"),
+  metrics_allowed_statuses: z
+    .array(z.enum(["DEFENDED", "SCOPE", "PARTIAL", "OPEN", "RETIRED"]))
+    .optional()
+    .describe("Metrics-register statuses whose numbers may appear in a résumé or letter. Omit for DEFENDED and SCOPE"),
   standing_base_app: z
     .string()
     .optional()
@@ -72,6 +80,18 @@ export const dreamCompanySchema = z.object({
 export const saveSearchProfileShape = {
   function_terms: z.array(z.string()).optional().describe("Title words that gate the discipline (hard filter)"),
   exclude_terms: z.array(z.string()).optional(),
+  search_terms: z
+    .array(z.string())
+    .optional()
+    .describe("Words sent as the search text to job sites that only answer a search (Workday); at most 3 are used. Omit to use the first function terms"),
+  role_phrases: z
+    .array(z.string())
+    .optional()
+    .describe("Phrases that name the user's own role in a title (e.g. \"software engineer\"); read only with soft_exclude_terms"),
+  soft_exclude_terms: z
+    .array(z.string())
+    .optional()
+    .describe("Exclude terms that do not block a title carrying a role phrase in another part of the title (e.g. \"sales\" in \"Software Engineer, Sales Platform\")"),
   locations: z.array(z.string()).optional().describe("Place words that count as local; lowercase"),
   secondary_locations: z.array(z.string()).optional().describe("Higher-bar places: only strong fits surface; may include international cities"),
   excluded_locations: z.array(z.string()).optional().describe("Onsite/hybrid locations that are out (lowercase substrings); remote postings are exempt"),

@@ -6,7 +6,7 @@
  * fall back to a system Chrome if present. If no browser is available, the caller
  * gets a clear error (PDF is optional to the core flow).
  */
-export async function htmlToPdf(html: string): Promise<Buffer> {
+export async function htmlToPdf(html: string, paper: "letter" | "a4" = "letter"): Promise<Buffer> {
   const isServerless = Boolean(
     process.env.AWS_LAMBDA_FUNCTION_VERSION || process.env.VERCEL,
   );
@@ -49,7 +49,7 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     });
     await page.setContent(html, { waitUntil: "load" });
     const pdf = await page.pdf({
-      format: "letter",
+      format: paper,
       printBackground: true,
       margin: { top: "0", bottom: "0", left: "0", right: "0" },
     });

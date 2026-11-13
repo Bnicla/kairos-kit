@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Kairos Kit daily routine (launchd: com.kairos-kit.daily, set up by install.sh).
 #   1. prune-closed      move drafts whose listing closed to the Closed column
-#   2. harvest-registry  refresh the job-board list when older than 30 days
+#   2. harvest-registry  refresh the job-board list when older than 30 days (kept in $KAIROS_HOME/sourcing)
 #   3. sourcing-run      fresh sweep + triage into the Sourced column
 #   4. dream-watch       check your dream companies' career sites directly
 # Writes $KAIROS_HOME/logs/daily.log (last run) and sourcing/daily-heartbeat.json.
@@ -34,11 +34,11 @@ run_status=ok
   cd "$KIT" || exit 1
   echo "--- prune-closed ---"
   npm -w kairos-local run prune-closed || run_status=degraded
-  REG="$KIT/packages/engine/sourcing/registry.json"
-  if [ -f "$REG" ] && [ -n "$(find "$REG" -mtime +30 2>/dev/null)" ]; then
-    echo "--- harvest-registry (stale >30d) ---"
-    npm -w kairos-local run harvest-registry || echo "harvest failed; sweeping with the current registry"
-  fi
+  # The script harvests only when the job-board list in use is over 30 days
+  # old. It writes the refreshed list to $KAIROS_HOME/sourcing/registry.json
+  # and changes no file of the kit, so /update finds an unmodified checkout.
+  echo "--- harvest-registry ---"
+  npm -w kairos-local run harvest-registry || echo "harvest failed; sweeping with the current job-board list"
   echo "--- sourcing-run ---"
   npm -w kairos-local run sourcing-run || run_status=failed
   if [ "$(date +%u)" = "1" ]; then

@@ -2,8 +2,8 @@
  * User settings that used to be constants in code. Two homes, both user data:
  *
  *   - profile.md frontmatter: résumé and writing settings (standing_base_app,
- *     resume_leadin_aliases, target_pages, resume_page2_anchor, voice,
- *     stories_map).
+ *     resume_leadin_aliases, target_pages, resume_page2_anchor, paper,
+ *     metrics_allowed_statuses, voice, stories_map).
  *   - sourcing/search-profile.json: sourcing settings (dream_companies,
  *     board.max_sourced_cards, daily_run). Types in sourcing/types.ts.
  *
@@ -12,6 +12,9 @@
  */
 import matter from "gray-matter";
 import type { SearchProfile } from "./sourcing/types";
+import type { Paper } from "./docx-render";
+import { DEFAULT_ALLOWED_METRIC_STATUSES, METRIC_STATUSES, type MetricStatus } from "./metrics-register";
+import type { Store } from "./store/types";
 
 export interface VoiceSettings {
   /**
@@ -31,6 +34,18 @@ export interface ProfileSettings {
   resume_leadin_aliases?: Record<string, string>;
   target_pages?: 1 | 2;
   resume_page2_anchor?: string;
+  /**
+   * Paper size of the résumé and the cover letter: "letter" (US Letter) or
+   * "a4". Unset: US Letter for a United States search, A4 for a search that
+   * includes other countries (see `resumePaper`).
+   */
+  paper?: Paper;
+  /**
+   * Metrics-register statuses whose numbers may appear in a résumé or letter.
+   * Unset: DEFENDED and SCOPE. Listing all five statuses turns the register
+   * check off.
+   */
+  metrics_allowed_statuses?: MetricStatus[];
   voice?: VoiceSettings;
   /** Path, inside the data folder, of the stories map read by the deep-dives page. */
   stories_map?: string;
@@ -75,6 +90,14 @@ export function readProfileSettings(profileRaw: string | null | undefined): Prof
   if (fm.target_pages === 1 || fm.target_pages === 2) out.target_pages = fm.target_pages;
   const anchor = str(fm.resume_page2_anchor);
   if (anchor) out.resume_page2_anchor = anchor;
+  const paper = str(fm.paper)?.toLowerCase();
+  if (paper === "letter" || paper === "a4") out.paper = paper;
+  if (Array.isArray(fm.metrics_allowed_statuses)) {
+    const wanted = new Set(fm.metrics_allowed_statuses.filter((x): x is string => typeof x === "string").map((x) => x.trim().toUpperCase()));
+    // A list with no valid status is ignored: a typo must not open the gate or close it entirely.
+    const statuses = METRIC_STATUSES.filter((st) => wanted.has(st));
+    if (statuses.length) out.metrics_allowed_statuses = statuses;
+  }
   const voice = fm.voice as Record<string, unknown> | undefined;
   if (voice && typeof voice === "object") {
     const v: VoiceSettings = {};
@@ -85,6 +108,34 @@ export function readProfileSettings(profileRaw: string | null | undefined): Prof
   const map = str(fm.stories_map);
   if (map) out.stories_map = map;
   return out;
+}
+
+/**
+ * The paper for a résumé or letter. The profile's `paper` wins. With none set,
+ * the search decides: the default search is limited to the United States
+ * (`international_ok` false or absent, or no search profile yet), where
+ * résumés are printed on US Letter; a search that takes postings from other
+ * countries gets A4.
+ */
+export function resumePaper(
+  settings: Pick<ProfileSettings, "paper">,
+  search: Pick<SearchProfile, "international_ok"> | null | undefined,
+): Paper {
+  return settings.paper ?? (search?.international_ok === true ? "a4" : "letter");
+}
+
+/** `resumePaper` read from a data folder (profile.md and sourcing/search-profile.json). */
+export async function loadResumePaper(store: Pick<Store, "readFile" | "readJson">): Promise<Paper> {
+  const [profileRaw, search] = await Promise.all([
+    store.readFile(["profile.md"]),
+    store.readJson<Pick<SearchProfile, "international_ok">>(["sourcing", "search-profile.json"]),
+  ]);
+  return resumePaper(readProfileSettings(profileRaw), search);
+}
+
+/** The register statuses whose numbers may appear in a document (default DEFENDED and SCOPE). */
+export function allowedMetricStatuses(settings: Pick<ProfileSettings, "metrics_allowed_statuses">): readonly MetricStatus[] {
+  return settings.metrics_allowed_statuses ?? DEFAULT_ALLOWED_METRIC_STATUSES;
 }
 
 /**
