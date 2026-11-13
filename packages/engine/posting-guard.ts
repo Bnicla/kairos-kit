@@ -818,6 +818,15 @@ const KAIROS_TOOLS =
 
 const AI = "(?:ai|llm|large language model|language model|chatbot|chat ?gpt|gpt|claude|gemini|copilot|bot|assistant|agent|model)";
 
+/** AI named as such: narrower than AI, for patterns where "model", "agent" or "assistant" alone would hit ordinary ad text. */
+const NAMED_AI = "(?:ai|llm|large language model|language model|chatbot|chat ?gpt|gpt|claude|gemini|copilot)";
+
+/** Who a line speaks to when it speaks to software that writes or screens applications. */
+const TOOL_ADDRESSEE =
+  `(?:(?:automated|ai[- ]powered|ai[- ]based)\\s+(?:[a-zé]+\\s+){0,3}?(?:tools?|systems?|software|writers?|assistants?|screeners?|parsers?|bots?|agents?)` +
+  `|${NAMED_AI}s?(?:\\s+(?:[a-zé]+\\s+)?(?:tools?|systems?|assistants?|agents?|models?|writers?|screeners?))?` +
+  `|(?:resume|résumé|cv)\\s+(?:writers?|builders?|generators?|tools?|assistants?|screeners?|parsers?|bots?|software))`;
+
 /**
  * Patterns run on normalizeForScan() output. Calibrated for AI-product job ads,
  * which legitimately talk about system prompts, MCP, API keys, tool calling and
@@ -841,6 +850,13 @@ const INSTRUCTION_PATTERNS: RegExp[] = [
   /\bas an? (?:ai|artificial intelligence|large language|language) (?:language )?(?:model|assistant)\b/,
   new RegExp(`\\b${AI}s?\\b[^.\\n]{0,20}\\b(?:reading|processing|parsing|screening|reviewing|evaluating|summari[sz]ing|analy[sz]ing)\\s+(?:this|these)\\s+(?:job\\s+)?(?:posting|post|ad|advert|advertisement|description|page|text|document|listing|application|resume|résumé|cv|message|content)s?\\b`),
   new RegExp(`\\b(?:note|message|instructions?|attention|dear|psa)\\s*(?:to|for)?\\s*(?:all\\s+|any\\s+|the\\s+)?${AI}s?\\s*(?:[,:!]|—|-\\s)`),
+  // Addressing a résumé tool, and telling it to change the candidate's document
+  // (2026-11-12: four such lines, visible and hidden, passed unflagged in the
+  // provenance comparison; none says "ignore previous instructions").
+  new RegExp(`\\b(?:note|message|instructions?|attention|notice|dear|psa|reminder)\\s*(?:to|for)?\\s*(?:all\\s+|any\\s+|the\\s+)?${TOOL_ADDRESSEE}\\b[^.\\n:]{0,60}[:,]`),
+  new RegExp(`\\b${NAMED_AI}s?\\s+(?:(?:assistant|agent|tool|model|system)s?\\s+)?instructions?\\s*:`),
+  /\b(?:add|include|insert|list|append|put|write|state|mention|claim)\b[^.\n]{0,80}\b(?:(?:to|in|into|under|on)\s+(?:the\s+)?(?:candidate|applicant)'s\s+(?:certifications?|skills?|resume|résumé|cv|credentials?|qualifications?|profile|summary|education)|that\s+the\s+(?:candidate|applicant)\s+(?:holds?|has|is|possesses|earned|obtained))\b/,
+  /\binclude\s+the\s+(?:line|phrase|sentence|words?|keywords?|text)\b[^.\n]{0,80}\b(?:certifications?|resume|résumé|cv|skills|summary|credentials)\b/,
   // Hide things from the person.
   /\b(?:do not|don't|never|without)\s+(?:tell(?:ing)?|inform(?:ing)?|mention(?:ing)?|reveal(?:ing)?|disclos(?:e|ing)|alert(?:ing)?|notify(?:ing)?|let(?:ting)?)\s+(?:this\s+to\s+|it\s+to\s+|anything\s+to\s+)?(?:the\s+)?(?:user|candidate|applicant|human|operator|job seeker)s?\b/,
   /\bkeep (?:this|it|these instructions) (?:secret|hidden|confidential) from\b/,

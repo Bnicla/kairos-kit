@@ -92,10 +92,14 @@ only through the MCP tools; a direct edit needs `rebuild_index` afterwards.
    score with the gaps (`save_score`). Text from the posting is cleaned of
    hidden markup first (`posting-guard.ts`).
 3. **Tailored.** `/tailor` gets the generation evidence, writes the résumé, and
-   calls `save_resume`. The save is refused if a coverage row quotes text that
-   is not on the résumé, or if the résumé uses a phrasing the record forbids.
-   The result lists bullets whose claim of ownership no verified fact supports
-   ("stretch check"); the user keeps, softens or drops each one.
+   calls `save_resume`. The save is refused if a number, a count, an employer,
+   an organisation named as a place of work or a credential is not in the
+   record, if a coverage row quotes text that is not on the résumé, or if the
+   résumé uses a phrasing the record forbids. The result lists the bullets and
+   summary sentences the record does not fully support, such as a claim of
+   ownership, wording stronger than the record's, or a number attached to
+   another result ("stretch check"); the user keeps, softens or drops each
+   one.
    `check_resume_layout` renders the file and checks page count, the page
    break and the text a hiring system reads.
 4. **Answers and letter.** Application questions draw on earlier approved

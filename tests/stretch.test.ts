@@ -133,7 +133,12 @@ describe("checkResumeStretch", () => {
   });
 
   it("never lets an unverified [?] fact or a correction line support a claim", () => {
-    expect(run("**Pilot:** Owned the pilot program with three firms.").map((x) => x.trigger)).toEqual(["owned"]);
+    // The only verified line that states a three is "over three years": the
+    // number rule (2026-11-13) lists "three firms" as attached to another result.
+    expect(run("**Pilot:** Owned the pilot program with three firms.").map((x) => [x.rule, x.trigger])).toEqual([
+      ["ownership", "owned"],
+      ["number", "three firms"],
+    ]);
   });
 
   it("accepts the candidate's own curated writing as support", () => {

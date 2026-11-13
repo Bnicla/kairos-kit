@@ -210,9 +210,21 @@ export function checkAtsCoverage(jobText: string, resumeText: string): AtsCovera
 // --- Grounding (anti-fabrication, mechanical) --------------------------------
 
 export interface GroundingIssue {
-  kind: "unknown_employer" | "ungrounded_metric" | "unknown_source" | "metric_source_mismatch";
+  kind:
+    | "unknown_employer"
+    | "ungrounded_metric"
+    | "unknown_source"
+    | "metric_source_mismatch"
+    | "ungrounded_count"
+    | "count_source_mismatch"
+    | "ungrounded_credential"
+    | "ungrounded_skill"
+    | "unknown_organisation";
   detail: string;
 }
+
+/** Findings the candidate decides on (reported as warnings); every other kind blocks the save. */
+export const ADVISORY_GROUNDING: ReadonlySet<GroundingIssue["kind"]> = new Set(["ungrounded_skill"]);
 
 /**
  * Mechanically verify a generated résumé against the verified KB evidence:
@@ -225,6 +237,20 @@ export interface GroundingIssue {
  *    numbers into false claims is fabrication too). The executive summary stays
  *    corpus-wide, because it legitimately aggregates across roles.
  *  - every provenance_audit.source_experience must name a real KB file
+ *  - every plain count ("a team of 12", "40 users", "three clinics") must appear
+ *    as a number in the verified text of that employer (2026-11-12: the
+ *    provenance comparison showed a count the KB never states passed the gate).
+ *    In the summary the number may be anywhere in the evidence; a count found
+ *    nowhere blocks, unless the record could add up to it across roles (see
+ *    `composableTotal`): the stretch check then lists it as a total
+ *  - a credential (skills line or prose) must be in the verified evidence, and
+ *    so must every education entry when the record holds education; a named
+ *    tool or acronym on the skills line found nowhere in it is reported, not
+ *    blocked
+ *  - an organisation named in prose after "at" ("At Acme, I …", "two years at
+ *    Acme"), in the summary, a role intro or a bullet, must be named somewhere
+ *    in the verified evidence: an employer written into a sentence is checked
+ *    like one written as a section heading
  * `extraCorpus` admits curated non-experience sources (profile, education) and
  * also grounds section-level metrics (a summary line may cite profile facts).
  */
@@ -232,16 +258,25 @@ export function checkResumeGrounding(
   gen: GeneratedResume,
   experiences: Experience[],
   extraCorpus = "",
+  opts: {
+    /** The record holds education entries (they are in `extraCorpus`): check the résumé's education against them. */
+    educationRecorded?: boolean;
+    /** The company the résumé is written for. Naming it inside a sentence ("the design team at Acme") is not a claim to have worked there. */
+    targetCompany?: string;
+  } = {},
 ): GroundingIssue[] {
   const issues: GroundingIssue[] = [];
   const companies = new Set(experiences.map((e) => e.frontmatter.company.toLowerCase().trim()));
   const fileNames = new Set(experiences.map((e) => e.fileName.replace(/\.md$/, "")));
   const strippedByCompany = new Map<string, string>();
+  const rawByCompany = new Map<string, string>();
   for (const e of experiences) {
     const key = e.frontmatter.company.toLowerCase().trim();
-    const text = normalizeMetrics(serializeExperience(stripUnverified(e)));
+    const raw = serializeExperience(stripUnverified(e));
+    const text = normalizeMetrics(raw);
     // Two KB entries for the same employer merge (e.g. two roles at one company).
     strippedByCompany.set(key, (strippedByCompany.get(key) ?? "") + "\n" + text);
+    rawByCompany.set(key, (rawByCompany.get(key) ?? "") + "\n" + raw);
   }
   const extra = normalizeMetrics(extraCorpus);
   const corpus = [...strippedByCompany.values()].join("\n") + "\n" + extra;
@@ -278,20 +313,121 @@ export function checkResumeGrounding(
     }
   }
 
+  // Plain counts. Same two passes as the metrics: a count found nowhere is
+  // invented; a count under an employer must be a number of THAT employer.
+  const extraNumbers = numbersIn(extraCorpus);
+  const allNumbers = new Set(extraNumbers);
+  const numbersByCompany = new Map<string, Set<string>>();
+  for (const [key, raw] of rawByCompany) {
+    const set = numbersIn(raw);
+    numbersByCompany.set(key, set);
+    for (const n of set) allNumbers.add(n);
+  }
+  const entryTexts = experiences.map((e) => serializeExperience(stripUnverified(e)));
+  for (const token of extractCountTokens(gen.resume.executive_summary)) {
+    if (allNumbers.has(token.value)) continue;
+    // "Five products", "three markets": a total composed across roles is on no
+    // single line. When the record could add up to it, the save is not blocked
+    // and the stretch check lists the total for the candidate to confirm.
+    if (composableTotal(token, entryTexts)) continue;
+    issues.push({ kind: "ungrounded_count", detail: `"${token.raw}" (summary): the number ${token.value} is not in any verified KB fact` });
+  }
+  for (const exp of gen.resume.experience) {
+    const own = numbersByCompany.get(exp.company.toLowerCase().trim());
+    if (own === undefined) continue;
+    for (const token of extractCountTokens([exp.summary ?? "", ...exp.bullets].join("\n"))) {
+      if (own.has(token.value) || extraNumbers.has(token.value)) continue;
+      issues.push(
+        allNumbers.has(token.value)
+          ? { kind: "count_source_mismatch", detail: `"${token.raw}" under "${exp.company}": the number ${token.value} is not in that experience's verified facts (it exists elsewhere in the KB)` }
+          : { kind: "ungrounded_count", detail: `"${token.raw}" under "${exp.company}": the number ${token.value} is not in any verified KB fact` },
+      );
+    }
+  }
+
+  // Organisations named in prose. An employer of the record, or a name a
+  // verified fact, the profile or the education record holds, is accepted; a
+  // name found nowhere is an organisation the record does not know.
+  const companyNames = experiences.map((e) => e.frontmatter.company);
+  const recorded = [...rawByCompany.values()].join("\n");
+  const proseUnits = [
+    { where: "summary", text: gen.resume.executive_summary },
+    ...gen.resume.experience.flatMap((exp) => [exp.summary ?? "", ...exp.bullets].map((text) => ({ where: `under "${exp.company}"`, text }))),
+  ];
+  const target = opts.targetCompany?.trim() ? [opts.targetCompany] : [];
+  for (const unit of proseUnits) {
+    for (const org of proseOrganisations(unit.text, companyNames, recorded, extraCorpus)) {
+      if (org.status !== "unknown") continue;
+      // "At <the hiring company>, I …" opening a sentence is still a claim to have worked there.
+      if (!org.opening && target.length && proseOrganisations(`at ${org.name}`, target, "")[0]?.status === "company") continue;
+      issues.push({ kind: "unknown_organisation", detail: `"at ${org.name}" (${unit.where}): "${org.name}" is not an employer of the knowledge base and is named in no verified fact` });
+    }
+  }
+
+  // Skills, credentials and education. A credential (on the skills line or
+  // in prose) and an education entry must sit on one line of the verified
+  // evidence. A named tool or acronym on the skills line that the evidence
+  // never mentions is reported, not blocked: skills lines are themes in the
+  // candidate's own words, and only their named terms can be checked.
+  const evidence = [...rawByCompany.values(), extraCorpus].join("\n");
+  const evidenceLines = evidence.split("\n").map(wordSet).filter((w) => w.size);
+  const evidenceWords = new Set(evidenceLines.flatMap((w) => [...w]));
+  const evidenceTerms = termSet(evidence);
+  const onOneLine = (words: string[]) => evidenceLines.some((line) => words.every((w) => line.has(w)));
+  const credentialIssue = (phrase: string, where: string) => {
+    // The name must be on one line; the marker word itself ("certified") need not be.
+    const words = [...wordSet(phrase)].filter((w) => !CREDENTIAL_MARKER.test(w));
+    if (words.length && !onOneLine(words)) {
+      issues.push({ kind: "ungrounded_credential", detail: `"${phrase.trim()}" (${where}) is not a credential in the verified KB evidence` });
+    }
+  };
+  for (const skill of gen.resume.skills ?? []) {
+    const segments = skill.split(/[(),;]|\s[&\/]\s/).map((x) => x.trim()).filter(Boolean);
+    const credentials = segments.filter((seg) => CREDENTIAL_RE.test(seg));
+    for (const seg of credentials) credentialIssue(seg, "skills");
+    // "Data stores: Postgres, Redis": the part before the colon is a category
+    // label in the writer's words, and each item after it is a name.
+    const colon = skill.indexOf(":");
+    const items = colon > 0 ? skill.slice(colon + 1).split(/[(),;]|\s[&\/]\s/).map((x) => x.trim()).filter(Boolean) : segments;
+    const rest = items.filter((seg) => !credentials.includes(seg));
+    const missing = namedTerms(rest, colon > 0 || segments.length === 1).filter((t) => !GENERIC_ACRONYMS.has(singular(t.toLowerCase()))).filter((t) => !evidenceTerms.has(t.toLowerCase()) && !evidenceTerms.has(singular(t.toLowerCase())));
+    if (missing.length) {
+      issues.push({ kind: "ungrounded_skill", detail: `"${skill}" (skills): ${missing.map((m) => `"${m}"`).join(", ")} appears nowhere in the verified KB evidence` });
+    }
+  }
+  for (const phrase of credentialPhrases(prose)) credentialIssue(phrase, "résumé text");
+  // Without an education record there is nothing to check an entry against:
+  // a user who keeps education only on the résumé is not blocked.
+  for (const ed of opts.educationRecorded ? (gen.resume.education ?? []) : []) {
+    const institution = [...wordSet(ed.institution)];
+    const credential = [...wordSet(ed.credential)];
+    const known = credential.filter((w) => evidenceWords.has(w)).length;
+    if ((institution.length && !onOneLine(institution)) || (credential.length && known * 2 < credential.length)) {
+      issues.push({ kind: "ungrounded_credential", detail: `"${ed.credential}, ${ed.institution}" (education) is not in the verified KB evidence` });
+    }
+  }
+
   // A source is grounded if it names a real KB experience by ANY of its
   // identifiers — file name, frontmatter id, or company. The guarantee is
-  // "traces to a real experience", not "spelled one particular way".
+  // "traces to a real experience", not "spelled one particular way": a label
+  // that adds a title or a detail ("Acme (Senior PM)", "Education: B.S. ...")
+  // is read by its head. Seven of eight blocked saves in the provenance run of
+  // 2026-11-12 were such labels, none about a fact.
   const ids = new Set(
     experiences.map((e) => (e.frontmatter.id ?? "").toLowerCase().trim()).filter(Boolean),
   );
+  const lowerFiles = new Set([...fileNames].map((f) => f.toLowerCase()));
+  const namesKnownSource = (label: string): boolean => {
+    const ref = label.replace(/\.md\b/, "").trim().toLowerCase();
+    const exact = (r: string) => lowerFiles.has(r) || ids.has(r) || companies.has(r) || r === "profile" || r === "education";
+    if (exact(ref)) return true;
+    if (/^(?:education|profile)\b/.test(ref)) return true;
+    const head = ref.split(/\s*(?:\(|\[|—|–|\s-\s|:|,|\||\/)/)[0]!.trim();
+    if (head && exact(head)) return true;
+    return [...companies, ...ids, ...lowerFiles].some((name) => name.length >= 3 && ref.startsWith(name) && !/[a-z0-9]/.test(ref[name.length] ?? ""));
+  };
   for (const entry of gen.provenance_audit) {
-    const ref = entry.source_experience.replace(/\.md$/, "").trim();
-    const known =
-      fileNames.has(ref) ||
-      ids.has(ref.toLowerCase()) ||
-      companies.has(ref.toLowerCase()) ||
-      ["profile", "education"].includes(ref.toLowerCase());
-    if (!known) {
+    if (!namesKnownSource(entry.source_experience)) {
       issues.push({
         kind: "unknown_source",
         detail: `provenance source "${entry.source_experience}" is not a KB experience (use a file name, id, or company from the KB)`,
@@ -369,6 +505,8 @@ export function describeMetricStatusIssues(issues: MetricStatusIssue[], allowed:
 interface MetricToken {
   raw: string;
   normalized: string;
+  /** Where the token starts in the text. */
+  index: number;
 }
 
 /**
@@ -397,9 +535,326 @@ export function extractMetricTokens(text: string): MetricToken[] {
     if (/^\s*(years?|yrs?)\b/i.test(after)) continue; // tenure math, not a claim
     const bare = raw.replace(/[^0-9]/g, "");
     if (bare.length === 4 && +bare >= 1900 && +bare <= 2099) continue; // year
-    out.push({ raw, normalized: normalizeMetrics(raw) });
+    out.push({ raw, normalized: normalizeMetrics(raw), index: m.index ?? 0 });
   }
   return out;
+}
+
+export interface CountToken {
+  /** The number with the word after it, as written. */
+  raw: string;
+  /** The number in digits ("12", "1.8"). */
+  value: string;
+  /** Where the number starts in the text (bold markers removed). */
+  index: number;
+}
+
+export const NUMBER_WORDS: Record<string, string> = {
+  one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10",
+  eleven: "11", twelve: "12", thirteen: "13", fourteen: "14", fifteen: "15", sixteen: "16", seventeen: "17",
+  eighteen: "18", nineteen: "19", twenty: "20", thirty: "30", forty: "40", fifty: "50", sixty: "60",
+  seventy: "70", eighty: "80", ninety: "90", hundred: "100",
+};
+
+/** A number after one of these is a label ("phase 2", "top 10"), not a count. */
+const LABEL_BEFORE = new Set(
+  "phase tier level version step stage wave round type grade series gen generation sprint release quarter year day week month top no number page section priority sev rank figure table chapter class category item rule track cohort batch season volume vol web".split(" "),
+);
+
+const COUNT_UNIT =
+  "person|people|member|engineer|developer|designer|analyst|site|country|market|team|city|state|school|store|product|week|month|day|hour|minute|strong";
+
+/**
+ * Plain counts: a bare number (digits, or two to twelve spelled out) that the
+ * metric tokens do not cover, such as "a team of 12", "40 users", "3 clinics",
+ * "4-person team" or "1.8 billion entries". Excluded, as not being claims:
+ * years and "N years" tenure, labels ("Phase 2", "Top 10"), a number after a
+ * capitalized name inside a sentence ("Python 3", "Series B 2"), and anything
+ * glued to letters or symbols ("p99", "24/7", "Q3", "$5", "12%").
+ */
+export function extractCountTokens(text: string): CountToken[] {
+  const out: CountToken[] = [];
+  const clean = text.replace(/\*\*/g, "");
+  const push = (raw: string, value: string, index: number) => out.push({ raw: raw.replace(/\s+/g, " ").trim(), value: value.replace(/^0+(?=\d)/, ""), index });
+
+  const digits = /(?<![\w.,$€£#\/@-])(\d{1,7}(?:\.\d+)?)(?=\s+[A-Za-z(]|[.,;:)]?(?:\s|$))/g;
+  for (const m of clean.matchAll(digits)) {
+    const value = m[1]!;
+    const at = m.index ?? 0;
+    const after = clean.slice(at + value.length, at + value.length + 24);
+    const before = clean.slice(Math.max(0, at - 40), at);
+    if (/^\s*(?:years?|yrs?)\b/i.test(after)) continue; // tenure math, not a claim
+    if (/^\s?(?:%|[MBKmbk]\b|\+)/.test(after)) continue; // a metric token, checked above
+    if (/^\d{4}$/.test(value) && +value >= 1900 && +value <= 2099) continue; // year
+    if (ellipticalTenure(clean.slice(Math.max(0, at - 90), at), after)) continue;
+    const prev = before.match(/([A-Za-z][\w.+#'’-]*)\s*$/);
+    if (prev) {
+      const word = prev[1]!;
+      if (LABEL_BEFORE.has(word.toLowerCase())) continue;
+      const lead = before.slice(0, prev.index).trimEnd();
+      // A capitalized word inside a sentence names a product or a version ("Python 3").
+      if (/^[A-Z]/.test(word) && lead && !/[.;:!?•\n-]$/.test(lead)) continue;
+    }
+    const next = after.match(/^\s+([A-Za-z][\w-]*)/);
+    push(next ? `${value} ${next[1]}` : value, value, at);
+  }
+
+  const hyphen = new RegExp(`(?<![\\w.,$€£#\\/@-])(\\d{1,4})-(?:${COUNT_UNIT})\\b`, "gi");
+  for (const m of clean.matchAll(hyphen)) push(m[0], m[1]!, m.index ?? 0);
+
+  const spelled = /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+([a-z][\w-]*)/gi;
+  for (const m of clean.matchAll(spelled)) {
+    if (/^(?:years?|yrs?)$/i.test(m[2]!)) continue;
+    if (ellipticalTenure(clean.slice(Math.max(0, (m.index ?? 0) - 90), m.index ?? 0), ` ${m[2]}`)) continue;
+    push(m[0], NUMBER_WORDS[m[1]!.toLowerCase()]!, m.index ?? 0);
+  }
+  return out;
+}
+
+/** "Twelve years in design, with more than six in analytics": the second number is still years. */
+const ellipticalTenure = (before: string, after: string) => /\byears?\b[^.;\n]*$/i.test(before) && /^\s+(?:in|at|as|on|with)\b/i.test(after);
+
+/**
+ * Every number the evidence states as a plain number: digits (thousands commas
+ * removed) and spelled-out numbers. Money and percentages are left out (they
+ * cannot ground a count), and so are the parts of a date ("2021-08").
+ */
+function numbersIn(text: string): Set<string> {
+  const out = new Set<string>();
+  const clean = text.replace(/\*\*/g, "");
+  for (const m of clean.matchAll(/(?<![\w.$€£]|\d[-,\/])(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?!\d|\s?%|[-\/]\d)/g)) {
+    out.add(`${m[1]!.replace(/,/g, "").replace(/^0+(?=\d)/, "")}${m[2] ?? ""}`);
+  }
+  for (const m of clean.toLowerCase().matchAll(/\b[a-z]+\b/g)) {
+    const n = NUMBER_WORDS[m[0]];
+    if (n) out.add(n);
+  }
+  return out;
+}
+
+/** One number of a résumé line, with a test for whether a line of evidence states it. */
+export interface ClaimNumber {
+  /** The number as written ("40%", "12 engineers", "three clinics"). */
+  raw: string;
+  /** Where it starts in the text, once the bold markers are removed. */
+  index: number;
+  /** True for a plain count ("12 engineers"), false for a metric token ("40%", "$5M"). */
+  count: boolean;
+  /** For a plain count, the word after the number (what is counted). */
+  unit?: string;
+  /** True when the line of evidence states the same number. */
+  statedIn(line: string): boolean;
+}
+
+/** Every checked number of a résumé line: the metric tokens and the plain counts. */
+export function claimNumbers(text: string): ClaimNumber[] {
+  const clean = text.replace(/\*\*/g, "");
+  return [
+    ...extractMetricTokens(clean).map((t) => ({ raw: t.raw.trim(), index: t.index, count: false, statedIn: (line: string) => normalizeMetrics(line).includes(registerKey(t.normalized)) })),
+    ...extractCountTokens(clean).map((t) => ({
+      raw: t.raw,
+      index: t.index,
+      count: true,
+      ...(/\s/.test(t.raw) ? { unit: t.raw.split(" ")[1]! } : {}),
+      statedIn: (line: string) => numbersIn(line).has(t.value),
+    })),
+  ];
+}
+
+// --- Organisations named in prose --------------------------------------------
+
+export interface ProseOrganisation {
+  /** The name as written after "at". */
+  name: string;
+  /** "At <Name>, …" opening a sentence: the name is given as the place of work. */
+  opening: boolean;
+  /**
+   * company: an employer of the record. extra: named in the profile, the base
+   * résumé or the education record. recorded: named in a verified fact (a
+   * client, a partner, a site). unknown: named nowhere.
+   */
+  status: "company" | "extra" | "recorded" | "unknown";
+}
+
+const ORG_WORD = "[A-Z][A-Za-z0-9&+]*(?:[.'’-][A-Za-z0-9&+]+)*";
+const ORG_NAME = `${ORG_WORD}(?:\\s+(?:(?:of|and|for|the|de|&)\\s+)?${ORG_WORD})*`;
+const AT_ORG = new RegExp(`(?<![\\w-])(At|at)\\s+(?:the\\s+)?(${ORG_NAME})`, "g");
+
+/** Capitalized words after "at" that name a time, a stage or a rank, not an organisation. */
+const NOT_ORG = new Set(
+  "january february march april may june july august september october november december monday tuesday wednesday thursday friday saturday sunday q1 q2 q3 q4 h1 h2 fy ga mvp ipo eol eoy p0 p1 p2 series phase level stage tier day year launch scale peak fortune".split(" "),
+);
+/** "at Director level", "at Fortune 500 companies": the capitalized words qualify the noun after them. */
+const ORG_QUALIFIES = /^\s+(?:\d+\s+)?(?:level|scale|stage|grade|tier|speed|pace|rate|time|launch|close|size|risk|cost|volume|companies|firms|startups|start-ups|banks|schools|universities|clients|customers|retailers|agencies|organisations|organizations|institutions|enterprises|brands|hospitals|insurers)\b/i;
+/** "aimed at", "priced at": the word after "at" is a target or a value, not a place. */
+const AT_OF_A_VERB = /\b(?:aimed|targeted|directed|looked|pointed|geared|priced|valued|capped|set)\s*$/i;
+
+const ORG_NOISE = new Set("the and of for de inc llc ltd corp co company corporation plc gmbh sa".split(" "));
+const orgTokens = (s: string) =>
+  s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/['’]s\b/g, "").split(/[^a-z0-9+]+/).filter((w) => w && !ORG_NOISE.has(w));
+
+/**
+ * Organisations a résumé line names after "at": "At Acme, I built …", "two
+ * years at Acme Robotics". A name is read as a run of capitalized words (with
+ * "of", "and", "&" between them); the bold lead-in of a bullet is a title and
+ * is left out. Each name is looked up in the record: the employers first, then
+ * the profile, base résumé and education (`extra`), then the verified facts
+ * (`recorded`). A name of several words is found when it, or its first two
+ * words or more, appear together. English only: the rule reads the word "at".
+ */
+export function proseOrganisations(text: string, companies: string[], recorded: string, extra = ""): ProseOrganisation[] {
+  const out: ProseOrganisation[] = [];
+  const clean = text.replace(/\*\*[^*]*\*\*/g, " ");
+  const matches = [...clean.matchAll(AT_ORG)];
+  if (!matches.length) return out;
+  const companyTokens = companies.map(orgTokens).filter((c) => c.length);
+  const phrase = (s: string) => ` ${orgTokens(s).join(" ")} `;
+  const recordedText = phrase(recorded);
+  const extraText = phrase(extra);
+  // Strict: the name is an employer's name (or part of it), or is written as such in the evidence.
+  // Loose: the name starts with a known name and adds words ("Acme Robotics Fleet Software").
+  const statusOf = (name: string, loose: boolean): ProseOrganisation["status"] | null => {
+    const t = orgTokens(name);
+    if (!t.length) return null;
+    if (companyTokens.some((c) => t.every((w) => c.includes(w)) || (loose && c.every((w) => t.includes(w))))) return "company";
+    for (let n = t.length; n >= (loose ? Math.min(2, t.length) : t.length); n--) {
+      const head = ` ${t.slice(0, n).join(" ")} `;
+      if (extraText.includes(head)) return "extra";
+      if (recordedText.includes(head)) return "recorded";
+    }
+    return "unknown";
+  };
+  for (const m of matches) {
+    const at = m.index ?? 0;
+    const before = clean.slice(0, at).trimEnd();
+    const after = clean.slice(at + m[0].length);
+    // "Acme's London office": the name ends at the possessive.
+    const words = m[2]!.split(/\s+/);
+    const owner = words.findIndex((w) => /['’]s$/.test(w));
+    const name = (owner >= 0 ? words.slice(0, owner + 1) : words).join(" ").replace(/['’]s$/, "");
+    if (NOT_ORG.has(words[0]!.toLowerCase()) || AT_OF_A_VERB.test(before) || (owner < 0 && ORG_QUALIFIES.test(after))) continue;
+    const opening = m[1] === "At" && (before === "" || /[.!?;:•\n-]$/.test(before));
+    // "at Acme and Borealis": two names, each looked up on its own, unless the
+    // record writes the whole as one name ("Crane & Wills Advisory").
+    const strict = statusOf(name, false);
+    if (!strict) continue;
+    const parts = strict === "unknown" ? name.split(/\s+(?:and|&)\s+/) : [name];
+    for (const part of parts) {
+      const status = strict === "unknown" ? statusOf(part, true) : strict;
+      if (status) out.push({ name: part, opening, status });
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a count of the summary can be a total composed across roles: what it
+ * counts ("products" in "five products") is mentioned in the verified text of
+ * at least two record entries, and the count is no larger than the record can
+ * add up to: the numbers it states for that thing, plus one for every line
+ * that mentions it. "Led 60 engineers" over a record that mentions 3 and 15
+ * engineers is not a total.
+ */
+export function composableTotal(token: CountToken, entryTexts: string[]): boolean {
+  const unit = /\s/.test(token.raw) ? stemPlural(token.raw.split(" ")[1]!.toLowerCase()) : "";
+  if (!unit || unit.length < 3) return false;
+  let entries = 0;
+  let bound = 0;
+  for (const text of entryTexts) {
+    let mentioned = false;
+    for (const line of text.split("\n")) {
+      const words = line.toLowerCase().replace(/(\d),(?=\d{3})/g, "$1").split(/[^a-z0-9.]+/).filter(Boolean);
+      if (!words.some((w) => stemPlural(w.replace(/\.+$/, "")) === unit)) continue;
+      mentioned = true;
+      bound += 1;
+      words.forEach((w, i) => {
+        const n = /^\d+(?:\.\d+)?$/.test(w) ? Number(w) : Number(NUMBER_WORDS[w] ?? NaN);
+        // "3 clinics", "3 new clinics": the number sits just before what it counts.
+        if (!Number.isNaN(n) && words.slice(i + 1, i + 4).some((x) => stemPlural(x.replace(/\.+$/, "")) === unit)) bound += n;
+      });
+    }
+    if (mentioned) entries++;
+  }
+  return entries >= 2 && Number(token.value) <= bound;
+}
+
+/** A skills-line entry (or one segment of it) that names a credential rather than a skill. */
+const CREDENTIAL_RE = /\b(?:certif\w*|licen[sc]\w*|accredit\w*|chartered|credential\w*|diploma|pmp|capm|cspo|csm|psm|cfa|cpa|cissp|cisa|cism|itil|prince2|ccna|ccnp|cka|ckad|phr|sphr|frm)\b/i;
+
+const SKILL_STOPWORDS = new Set("and or of the a an in on for to with at by from as via including incl etc e g i e".split(" "));
+
+/** Words of a phrase for evidence matching: lowercase, light plural/verb stemming, "certified/certification" folded. */
+function wordSet(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9+#]+/)) {
+    if (!raw || SKILL_STOPWORDS.has(raw)) continue;
+    if (raw.length === 1 && !/[a-z]/.test(raw)) continue;
+    out.add(/^certif/.test(raw) ? "certif" : raw.length > 4 ? raw.replace(/(?:ing|ed|es|s)$/, "") : raw);
+  }
+  return out;
+}
+
+const CREDENTIAL_ACRONYMS = "PMP|CAPM|CSPO|CSM|PSM|CFA|CPA|CISSP|CISA|CISM|ITIL|PRINCE2|CCNA|CCNP|CKA|CKAD|PHR|SPHR|FRM";
+
+/**
+ * Credential claims in prose: "Certified Scrum Product Owner", "AWS Solutions
+ * Architect certification", or one of the common credential acronyms. Only
+ * capitalized names are read, so "certified 40 partners" and "the company's
+ * safety certification" are not claims of a credential.
+ */
+export function credentialPhrases(text: string): string[] {
+  const out = new Set<string>();
+  const clean = text.replace(/\*\*/g, "");
+  const name = "(?:[A-Z][\\w+#-]*(?:\\s+(?:of|in|for)\\s+|\\s+)){0,5}[A-Z][\\w+#-]*";
+  for (const m of clean.matchAll(new RegExp(`\\b(?:[Cc]ertified|[Ll]icensed|[Cc]hartered|[Aa]ccredited)\\s+(${name})`, "g"))) out.add(`Certified ${m[1]}`);
+  for (const m of clean.matchAll(new RegExp(`\\b(${name})\\s+(?:[Cc]ertification|[Cc]ertificate|[Cc]ertified|[Ll]icen[sc]e|[Cc]redential)\\b`, "g"))) out.add(`${m[1]} certification`);
+  for (const m of clean.matchAll(new RegExp(`\\b(?:${CREDENTIAL_ACRONYMS})\\b`, "g"))) out.add(m[0]);
+  return [...out];
+}
+
+/** Business shorthand that says nothing checkable about the candidate. */
+const GENERIC_ACRONYMS = new Set("kpi okr mvp prd roi b2b b2c gtm ux ui qa cx smb".split(" "));
+
+const CREDENTIAL_MARKER = /^(?:certif|licen[sc]\w*|accredit\w*|chartered|credential\w*)$/;
+
+const singular = (t: string) => t.replace(/s$/, "");
+
+/** Tokens of the evidence for named-term lookup, lowercase, with singular forms. */
+function termSet(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.toLowerCase().split(/[^a-z0-9+#.]+/)) {
+    const t = raw.replace(/^\.+|\.+$/g, "");
+    if (!t) continue;
+    out.add(t);
+    out.add(singular(t));
+    for (const part of t.split(".")) if (part) out.add(part);
+  }
+  return out;
+}
+
+/**
+ * The named terms of a skills entry, given as its segments: acronyms ("RAG",
+ * "KPIs"), names with a digit, an inner capital or a symbol ("M365",
+ * "PostgreSQL", "C++"), and capitalized words other than a segment's first
+ * word ("Google Maps SDK" gives Maps and SDK). An entry that is one single
+ * word is a named term ("Kafka"). Ordinary words are themes, not names.
+ */
+export function namedTerms(segments: string[], wholeEntry = segments.length === 1): string[] {
+  const out: string[] = [];
+  for (const segment of segments) {
+    const tokens = segment.split(/[\s\/&|→·•:-]+/).map((t) => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9+#]+$/g, "")).filter(Boolean);
+    tokens.forEach((t, i) => {
+      if (!/[A-Za-z]/.test(t)) return;
+      const named =
+        /[A-Z]{2,}/.test(t) ||
+        (/\d/.test(t) && /[A-Za-z]/.test(t)) ||
+        /[a-z][A-Z]/.test(t) ||
+        /[+#]/.test(t) ||
+        (/^[A-Z][a-z]/.test(t) && (i > 0 || (wholeEntry && tokens.length === 1)));
+      if (named) out.push(t);
+    });
+  }
+  return [...new Set(out)];
 }
 
 // --- Requirements coverage --------------------------------------------------

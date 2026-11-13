@@ -18,9 +18,12 @@ Follow the `kairos` skill, Workflow D (generate), with the layout check. Input:
      out for relevance;
    - the requirements coverage table: covered, partial and gap counts, then
      every gap with its priority and honest note;
-   - each `stretch_check` item: the bullet, the record's own wording, and the
-     question keep, soften or drop. Keep → `save_confirmed_fact` with the
-     student's exact words; soften or drop → edit and `save_resume` again.
+   - each `stretch_check` item (a bullet or a summary sentence the record does
+     not fully support): the text, the record's own wording, and the question
+     keep, soften or drop. Keep → `save_confirmed_fact` with the student's
+     exact words; soften or drop → edit and `save_resume` again;
+   - each `[ungrounded_skill]` warning: a tool on the skills line that the
+     record never mentions. The student confirms it as a fact, or it comes off.
 4. `render_docx({ appId })`, then `check_resume_layout({ appId })`. If the
    verdict is short, restore record bullets; if overflow, trim the weakest
    later bullets; save and check again.

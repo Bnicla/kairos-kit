@@ -13,6 +13,7 @@ import { GeneratedResumeSchema, ScoreReportSchema, formatIssues } from "@kairos/
 import {
   checkAtsCoverage,
   checkRequirementCoverage,
+  ADVISORY_GROUNDING,
   checkResumeGrounding,
   checkResumePerson,
   checkStyle,
@@ -86,7 +87,7 @@ export interface SaveResumeResult {
   provenanceEntries: number;
   /** Requirements coverage counts + gap list; null when the résumé carries no requirement_coverage. */
   coverage: RequirementCoverageSummary | null;
-  /** Bullets claiming more agency or scope than the KB states: ask keep / soften / drop. */
+  /** Bullets and summary sentences claiming more than the KB states (agency, scope, a number's result, a total): ask keep / soften / drop. */
   stretch: StretchFinding[];
   /** Paper the .docx was rendered on (profile.md `paper`, else by the search: see settings.resumePaper). */
   paper: Paper;
@@ -118,16 +119,20 @@ export async function saveGeneratedResume(
   // verified KB evidence. Profile + education are legitimate curated sources.
   const experiences = await loadExperiences(store);
   const profileRaw = (await store.readFile(["profile.md"])) ?? "";
+  const education = await loadEducation(store);
   const extraCorpus = [
     profileRaw,
     (await store.readFile(["base-resume.md"])) ?? "",
+    ...education, // credentials and education entries are checked against these
   ].join("\n");
-  const grounding = checkResumeGrounding(gen, experiences, extraCorpus);
+  const grounding = checkResumeGrounding(gen, experiences, extraCorpus, {
+    educationRecorded: education.length > 0,
+    targetCompany: (await readMeta(store, appId))?.company,
+  });
   const warnings: string[] = [];
+  const METRIC_KINDS = ["ungrounded_metric", "metric_source_mismatch", "ungrounded_count", "count_source_mismatch"];
   const hardGrounding = grounding.filter(
-    (g) =>
-      (g.kind !== "ungrounded_metric" && g.kind !== "metric_source_mismatch") ||
-      !opts.allowUngroundedMetrics,
+    (g) => !ADVISORY_GROUNDING.has(g.kind) && (!METRIC_KINDS.includes(g.kind) || !opts.allowUngroundedMetrics),
   );
   if (hardGrounding.length) {
     throw new Error(
@@ -148,7 +153,10 @@ export async function saveGeneratedResume(
 
   // Stretch (2026-11-03): ownership verbs and absolutes must be supported by a
   // verified fact of that employer. A phrasing the KB explicitly forbids blocks;
-  // the rest is the candidate's call (keep / soften / drop).
+  // the rest is the candidate's call (keep / soften / drop). Since 2026-11-13
+  // the same rules read the executive summary sentence by sentence, and the
+  // findings include a number attached to another result, a client given as a
+  // place of work and a total composed across roles.
   const stretchAll = checkResumeStretch(gen, experiences, extraCorpus, { candidateName: profileName(profileRaw) });
   const denied = stretchAll.filter((f) => f.kind === "denied");
   if (denied.length) {

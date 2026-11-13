@@ -175,11 +175,16 @@ Trigger: the user is ready to tailor a resume (requires a score first).
    report the requirements coverage from `save_resume`'s `requirement_coverage`:
    the covered / partial / gap counts and every gap (requirement, priority, and
    its honest note), so the user sees what the résumé does not cover. Then go
-   through `stretch_check`: for each bullet whose ownership verb or absolute
-   word the KB does not support, show the bullet and the KB's own wording and
-   ask keep / soften / drop. Keep → `save_confirmed_fact` with the user's exact words
-   (it then supports the wording next time); soften or drop → edit and call
-   `save_resume` again. Then offer to export the resume.
+   through `stretch_check`: each item is a bullet or a summary sentence the KB
+   does not fully support (an ownership verb or an absolute word, wording
+   stronger than the KB's, a number attached to another result, a total that no
+   line states, a client or partner named as the place of work). Show the text
+   and the KB's own wording and ask keep / soften / drop. Keep →
+   `save_confirmed_fact` with the user's exact words (it then supports the
+   wording next time); soften or drop → edit and call `save_resume` again.
+   Report any `[ungrounded_skill]` entry in `warnings` too: the KB never
+   mentions that tool, so the user either confirms it as a fact or it comes off
+   the skills line. Then offer to export the resume.
 5. On yes, call `render_docx({ appId })` (primary — an editable Word document in
    the candidate's style) and give the user the `docxPath`. Offer `render_pdf`
    too if they want a PDF.
