@@ -136,6 +136,8 @@ describe("Kairos MCP server: record, register and paper", () => {
     const saved = await client.callTool({ name: "save_resume", arguments: { appId, resume: resume("Shipped a reconciliation feature used by 40+ internal users.") } });
     expect(saved.isError, text(saved)).toBeFalsy();
     expect(JSON.parse(text(saved)).paper).toBe("letter");
+    // The origin of each line, found in code: the bullet is its own fact, the summary rests on the role's summary line.
+    expect(JSON.parse(text(saved)).line_origins).toEqual({ strong: 2, partial: 0, none: 0, no_origin: [], audit_disagreements: [] });
     expect(await pageSize("resume.docx")).toMatch(/w:w="12240"/);
 
     // The user asks for A4 in profile.md: the next render follows it.

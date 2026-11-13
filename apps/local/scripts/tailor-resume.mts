@@ -40,6 +40,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { saveGeneratedResume, readPage2Anchor } from "../../../packages/engine/tools/ops";
+import { summarizeOrigins, type LineOriginReport } from "../../../packages/engine/line-origin";
 import { getStore } from "../store/index";
 import { kairosHome } from "../store/local-fs";
 import { readProfileSettings } from "../../../packages/engine/settings";
@@ -150,9 +151,12 @@ let stretch: { company: string; trigger: string; detail: string; bullet: string 
 // Paper the résumé was rendered on: profile.md `paper`, else by the search
 // (settings.resumePaper). saveGeneratedResume resolves it and reports it.
 let paper: string | undefined;
+// The origin of each line, found in code by the save: counts, the lines with
+// no verified fact, and the provenance entries that name the wrong source.
+let origins: LineOriginReport | undefined;
 
 async function renderAndProbe(g: any) {
-  ({ stretch, paper } = await saveGeneratedResume(store, spec.appId, g, HEADLINE ? { headline: HEADLINE } : {}));
+  ({ stretch, paper, origins } = await saveGeneratedResume(store, spec.appId, g, HEADLINE ? { headline: HEADLINE } : {}));
   await renderDocxToPdf(join(HOME, "applications", spec.appId, "resume.docx"));
   return probeResumeLayout(join(HOME, "applications", spec.appId, "resume.docx"), { page2Anchor: anchor });
 }
@@ -179,5 +183,5 @@ while (rounds < 6) {
   probe = await renderAndProbe(buildResume(applied));
 }
 
-console.log(JSON.stringify({ appId: spec.appId, paper, verdict: probe.verdict, pages: probe.pages, page2Start: probe.page2Start, fitDrops: applied, guidance: probe.guidance ?? null, stretch_check: stretch.map(({ company, trigger, detail, bullet }) => ({ company, trigger, why: detail, bullet })) }, null, 1));
+console.log(JSON.stringify({ appId: spec.appId, paper, verdict: probe.verdict, pages: probe.pages, page2Start: probe.page2Start, fitDrops: applied, guidance: probe.guidance ?? null, stretch_check: stretch.map(({ company, trigger, detail, bullet }) => ({ company, trigger, why: detail, bullet })), line_origins: origins ? summarizeOrigins(origins) : null }, null, 1));
 if (probe.verdict !== "good") process.exit(2);

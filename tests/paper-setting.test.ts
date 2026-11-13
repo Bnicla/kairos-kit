@@ -113,6 +113,6 @@ describe("every local render path reads the paper setting", () => {
     expect(server).toMatch(/markdownLetterToDocx\(markdown, \{ template: \{ paper: await loadResumePaper\(store\) \} \}\)/);
     expect(readFileSync("apps/local/lib/generate.ts", "utf8")).toMatch(/markdownLetterToDocx\(markdown, \{ template: \{ paper: await loadResumePaper\(store\) \} \}\)/);
     // The headless résumé and tailor-resume go through saveGeneratedResume, which resolves the paper itself.
-    expect(readFileSync("apps/local/scripts/tailor-resume.mts", "utf8")).toMatch(/\{ stretch, paper \} = await saveGeneratedResume\(/);
+    expect(readFileSync("apps/local/scripts/tailor-resume.mts", "utf8")).toMatch(/\{ stretch, paper, origins \} = await saveGeneratedResume\(/);
   });
 });

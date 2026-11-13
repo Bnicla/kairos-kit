@@ -7,6 +7,7 @@ import { appendScoreVersion, readMeta, readSnapshot, saveResumeSource, updateMet
 import type { ApplicationStatus } from "@kairos/engine/applications";
 import { loadEducation, loadExperiences } from "@kairos/engine/kb/store";
 import { checkResumeStretch, type StretchFinding } from "@kairos/engine/stretch";
+import { checkLineOrigins, type LineOriginReport } from "@kairos/engine/line-origin";
 import { generatedResumeToMarkdown } from "@kairos/engine/resume-render";
 import { markdownResumeToDocx, type Paper, type TemplateSpec } from "@kairos/engine/docx-render";
 import { GeneratedResumeSchema, ScoreReportSchema, formatIssues } from "@kairos/engine/tools/schemas";
@@ -89,6 +90,11 @@ export interface SaveResumeResult {
   coverage: RequirementCoverageSummary | null;
   /** Bullets and summary sentences claiming more than the KB states (agency, scope, a number's result, a total): ask keep / soften / drop. */
   stretch: StretchFinding[];
+  /**
+   * The origin of every line (the verified fact or facts it comes from), found in code, with the counts
+   * and the findings of rule "origin": a line with no fact, a provenance_audit source that holds no fact for its line.
+   */
+  origins: LineOriginReport;
   /** Paper the .docx was rendered on (profile.md `paper`, else by the search: see settings.resumePaper). */
   paper: Paper;
 }
@@ -247,8 +253,15 @@ export async function saveGeneratedResume(
     );
   }
 
+  // Line origins (2026-11-13): the verified fact or facts each bullet, role
+  // intro and summary sentence comes from, found in code and saved with the
+  // résumé. The model's provenance_audit is compared with them, not trusted.
+  // A line with no origin is listed for the user and never blocks: what is
+  // clearly unsupported was blocked above.
+  const origins = checkLineOrigins(gen, experiences, { candidateName: profileName(profileRaw) });
+
   // Persist the three artifacts together so they can never desync.
-  await store.writeJson(["applications", appId, "resume.json"], gen);
+  await store.writeJson(["applications", appId, "resume.json"], { ...gen, line_origins: origins.lines });
   await saveResumeSource(store, appId, md);
   // Paper: an uploaded template's own size wins, else the user's setting.
   const paper = opts.template?.paper ?? (await loadResumePaper(store));
@@ -264,7 +277,7 @@ export async function saveGeneratedResume(
   const status = await advanceDraftStatus(store, appId, "drafted");
   if (status) await updateMeta(store, appId, { status });
 
-  return { warnings, ats, style, provenanceEntries: gen.provenance_audit.length, coverage, stretch, paper };
+  return { warnings, ats, style, provenanceEntries: gen.provenance_audit.length, coverage, stretch, origins, paper };
 }
 
 export interface LetterNumberCheck {

@@ -68,6 +68,30 @@ export interface RequirementCoverageRow {
   note?: string | null;
 }
 
+export type OriginStrength = "strong" | "partial" | "none";
+
+/**
+ * The origin of one résumé line: the verified fact or facts of the record it
+ * comes from, found in code (line-origin.ts), not taken from the model's
+ * provenance_audit. One per bullet, role intro and executive-summary sentence.
+ */
+export interface LineOrigin {
+  kind: "bullet" | "role_intro" | "summary";
+  /** Index of the role in `resume.experience` (bullet, role_intro). */
+  role?: number;
+  /** Index of the bullet in that role (bullet). */
+  bullet?: number;
+  /** Index of the sentence in the executive summary (summary). */
+  sentence?: number;
+  /** The line as the résumé writes it. */
+  text: string;
+  strength: OriginStrength;
+  /** Share of the line's content words found in the facts below, 0 to 1. */
+  overlap: number;
+  /** The facts, as the record writes them (tag included), with the id of their entry. Empty when the strength is "none". */
+  facts: { experience_id: string; fact: string }[];
+}
+
 export interface GeneratedResume {
   resume: {
     header: { name: string; contact: string };
@@ -95,4 +119,6 @@ export interface GeneratedResume {
   dropped_for_relevance?: string[];
   /** Requirement-by-requirement tailoring decision. Optional: résumés saved before 2026-11-03 lack it. */
   requirement_coverage?: RequirementCoverageRow[];
+  /** Written by the save, never by the model: the origin of each line. Résumés saved before 2026-11-13 lack it. */
+  line_origins?: LineOrigin[];
 }

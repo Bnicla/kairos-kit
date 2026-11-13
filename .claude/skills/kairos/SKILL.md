@@ -182,6 +182,11 @@ Trigger: the user is ready to tailor a resume (requires a score first).
    and the KB's own wording and ask keep / soften / drop. Keep →
    `save_confirmed_fact` with the user's exact words (it then supports the
    wording next time); soften or drop → edit and call `save_resume` again.
+   Then report `line_origins`: how many lines have a strong, partial or no
+   origin (the verified fact each line comes from, found in code; the dashboard
+   shows it beside the line). For each `no_origin` line ask which fact it rests
+   on (`save_confirmed_fact`, then save again), reword it or drop it; report
+   each `audit_disagreements` entry.
    Report any `[ungrounded_skill]` entry in `warnings` too: the KB never
    mentions that tool, so the user either confirms it as a fact or it comes off
    the skills line. Then offer to export the resume.

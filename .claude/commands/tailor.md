@@ -22,6 +22,9 @@ Follow the `kairos` skill, Workflow D (generate), with the layout check. Input:
      not fully support): the text, the record's own wording, and the question
      keep, soften or drop. Keep → `save_confirmed_fact` with the student's
      exact words; soften or drop → edit and `save_resume` again;
+   - `line_origins`: how many lines have a strong, partial or no origin in
+     the record, then each `no_origin` line (confirm the fact with
+     `save_confirmed_fact`, reword, or drop) and each `audit_disagreements` entry;
    - each `[ungrounded_skill]` warning: a tool on the skills line that the
      record never mentions. The student confirms it as a fact, or it comes off.
 4. `render_docx({ appId })`, then `check_resume_layout({ appId })`. If the

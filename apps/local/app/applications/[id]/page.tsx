@@ -6,6 +6,7 @@ import ScoreCompare from "@/components/ScoreCompare";
 import Timeline from "@/components/Timeline";
 import { archiveAction, deleteApplicationAction, generateDocAction, setStatusAction, markSubmittedAction } from "@/app/actions";
 import GenerateDocButton from "@/components/GenerateDocButton";
+import LineOrigins from "@/components/LineOrigins";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const app = await getApplication(id);
   if (!app) notFound();
-  const { meta, report, scoreVersions, jobText, resumeHtml, coverLetterHtml, questions, form, generationError, downloads, requirementCoverage } = app;
+  const { meta, report, scoreVersions, jobText, resumeHtml, coverLetterHtml, questions, form, generationError, downloads, requirementCoverage, lineOrigins } = app;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -183,6 +184,9 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
 
       {/* Requirements coverage: each requirement in the ad, matched to résumé evidence or marked as a gap */}
       {requirementCoverage && <CoverageTable rows={requirementCoverage} />}
+
+      {/* Line origins: each résumé line beside the fact of the record it comes from (collapsed) */}
+      {lineOrigins && <LineOrigins view={lineOrigins} />}
 
       {/* Prep notes — briefs and reconstructions kept in the application folder */}
       {app.prepNotes.length > 0 && (

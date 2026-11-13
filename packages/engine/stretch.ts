@@ -176,6 +176,13 @@ const stem = (w: string) => w.replace(/'s$/, "").replace(/(?:ing|ed|es|s)$/, "")
 
 const contentWords = (ws: string[]) => ws.filter((w) => w.length > 2 && !STOPWORDS.has(w) && !/^\d/.test(w)).map(stem);
 
+/**
+ * The content words of a text, stemmed, each once: what the rules of this file
+ * compare. Exported for the line origins (line-origin.ts), which match a
+ * résumé line to a fact with the same words the number rule counts.
+ */
+export const contentStems = (text: string): string[] => [...new Set(contentWords(tokens(text)))];
+
 /** A bullet as clauses of tokens. The bold lead-in is a title, not a claim, and is dropped. */
 const clauses = (bullet: string): string[][] =>
   bullet
@@ -483,7 +490,14 @@ function supported(sentences: string[][], words: Iterable<string>, objects: stri
 /** Minimum content words a number's clause must share with a line that states the number. */
 const NUMBER_MIN_SHARED = 1;
 
-const SUMMARY = "Executive summary";
+export const SUMMARY = "Executive summary";
+
+/** The executive summary as the sentences the checks read, in order (a line break also ends a sentence). */
+export const summarySentences = (summary: string): string[] =>
+  summary
+    .split("\n")
+    .filter((l) => l.trim())
+    .flatMap((line) => line.split(/(?<=[.!?])\s+(?=[A-Z*"“(])/).filter((x) => x.trim()));
 
 /**
  * `extraSupport` is the candidate's own curated writing (profile, base résumé):
@@ -603,7 +617,7 @@ export function checkResumeStretch(
       });
       continue;
     }
-    for (const sentence of line.split(/(?<=[.!?])\s+(?=[A-Z*"“(])/).filter((x) => x.trim())) {
+    for (const sentence of summarySentences(line)) {
       const named = [...byCompany.values()].filter((exps) => sentence.includes(exps[0]!.frontmatter.company.trim()));
       const scope = named.flat();
       const sentences = scope.length ? [...supportSentences(scope, guard), ...extraSentences] : allSentences;

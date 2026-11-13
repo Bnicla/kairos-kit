@@ -165,6 +165,28 @@ export function untaggedFacts(body: string): UntaggedFact[] {
     .map((u) => ({ line: u.start + 1, section: u.section, text: unitText(lines, u).trim() }));
 }
 
+/** A verified fact of an experience body: a fact line tagged [R], [C] or [F]. */
+export interface VerifiedFact {
+  /** 1-based line number within the body. */
+  line: number;
+  /** Heading the fact sits under, or null. */
+  section: string | null;
+  /** The fact as the record writes it, tag included. */
+  text: string;
+}
+
+/**
+ * The body facts `stripUnverified` keeps, one by one: tagged [R], [C] or [F],
+ * outside the holding pen. A résumé line is traced to these (line-origin.ts).
+ */
+export function verifiedFacts(body: string): VerifiedFact[] {
+  const lines = body.split("\n");
+  return bodyUnits(lines)
+    .filter((u) => u.kind === "fact" && !u.holdingPen)
+    .map((u) => ({ line: u.start + 1, section: u.section, text: unitText(lines, u).trim() }))
+    .filter((f) => ANY_TAG.test(f.text) && !UNVERIFIED_TAG.test(f.text));
+}
+
 /** Number of fact lines in a body, outside the holding pen (tagged or not). */
 export function countFacts(body: string): number {
   return bodyUnits(body.split("\n")).filter((u) => u.kind === "fact" && !u.holdingPen).length;

@@ -267,7 +267,6 @@ export function checkResumeGrounding(
 ): GroundingIssue[] {
   const issues: GroundingIssue[] = [];
   const companies = new Set(experiences.map((e) => e.frontmatter.company.toLowerCase().trim()));
-  const fileNames = new Set(experiences.map((e) => e.fileName.replace(/\.md$/, "")));
   const strippedByCompany = new Map<string, string>();
   const rawByCompany = new Map<string, string>();
   for (const e of experiences) {
@@ -408,24 +407,8 @@ export function checkResumeGrounding(
   }
 
   // A source is grounded if it names a real KB experience by ANY of its
-  // identifiers — file name, frontmatter id, or company. The guarantee is
-  // "traces to a real experience", not "spelled one particular way": a label
-  // that adds a title or a detail ("Acme (Senior PM)", "Education: B.S. ...")
-  // is read by its head. Seven of eight blocked saves in the provenance run of
-  // 2026-11-12 were such labels, none about a fact.
-  const ids = new Set(
-    experiences.map((e) => (e.frontmatter.id ?? "").toLowerCase().trim()).filter(Boolean),
-  );
-  const lowerFiles = new Set([...fileNames].map((f) => f.toLowerCase()));
-  const namesKnownSource = (label: string): boolean => {
-    const ref = label.replace(/\.md\b/, "").trim().toLowerCase();
-    const exact = (r: string) => lowerFiles.has(r) || ids.has(r) || companies.has(r) || r === "profile" || r === "education";
-    if (exact(ref)) return true;
-    if (/^(?:education|profile)\b/.test(ref)) return true;
-    const head = ref.split(/\s*(?:\(|\[|—|–|\s-\s|:|,|\||\/)/)[0]!.trim();
-    if (head && exact(head)) return true;
-    return [...companies, ...ids, ...lowerFiles].some((name) => name.length >= 3 && ref.startsWith(name) && !/[a-z0-9]/.test(ref[name.length] ?? ""));
-  };
+  // identifiers (see `auditSourceExperiences`).
+  const namesKnownSource = (label: string): boolean => auditSourceExperiences(label, experiences) !== null;
   for (const entry of gen.provenance_audit) {
     if (!namesKnownSource(entry.source_experience)) {
       issues.push({
@@ -435,6 +418,34 @@ export function checkResumeGrounding(
     }
   }
   return issues;
+}
+
+/**
+ * The record entries a provenance source label names, by ANY of their
+ * identifiers: file name, frontmatter id, or company. The guarantee is "traces
+ * to a real experience", not "spelled one particular way": a label that adds a
+ * title or a detail ("Acme (Senior PM)", "Education: B.S. ...") is read by its
+ * head. Seven of eight blocked saves in the provenance run of 2026-11-12 were
+ * such labels, none about a fact. Returns an empty list for the curated
+ * sources (profile, education), which are not entries, and null when the label
+ * names nothing in the record.
+ */
+export function auditSourceExperiences(label: string, experiences: Experience[]): Experience[] | null {
+  const ref = label.replace(/\.md\b/, "").trim().toLowerCase();
+  const namesOf = (e: Experience) =>
+    [e.fileName.replace(/\.md$/, ""), e.frontmatter.id ?? "", e.frontmatter.company].map((n) => String(n).toLowerCase().trim()).filter(Boolean);
+  const exact = (r: string) => experiences.filter((e) => namesOf(e).includes(r));
+  const curated = (r: string) => r === "profile" || r === "education";
+  if (curated(ref)) return [];
+  const whole = exact(ref);
+  if (whole.length) return whole;
+  if (/^(?:education|profile)\b/.test(ref)) return [];
+  const head = ref.split(/\s*(?:\(|\[|—|–|\s-\s|:|,|\||\/)/)[0]!.trim();
+  if (head && curated(head)) return [];
+  const byHead = head ? exact(head) : [];
+  if (byHead.length) return byHead;
+  const byPrefix = experiences.filter((e) => namesOf(e).some((name) => name.length >= 3 && ref.startsWith(name) && !/[a-z0-9]/.test(ref[name.length] ?? "")));
+  return byPrefix.length ? byPrefix : null;
 }
 
 /** The résumé text whose numbers are checked: the summary, and each role's summary and bullets. */

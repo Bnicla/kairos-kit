@@ -17,7 +17,8 @@ import {
 import { loadExperiences, loadVoiceProfile } from "@kairos/engine/kb/store";
 import { readApplicationForm, type ApplicationForm } from "@kairos/engine/forms";
 import { computeHealth, type HealthReport } from "@kairos/engine/health";
-import type { GeneratedResume, RequirementCoverageRow, ScoreReport } from "@kairos/engine/types";
+import type { GeneratedResume, LineOrigin, RequirementCoverageRow, ScoreReport } from "@kairos/engine/types";
+import { readLineOrigins } from "@kairos/engine/line-origin";
 import { buildDaily, buildFunnel, type DailyApplications, type Funnel } from "@kairos/engine/funnel";
 import { maxSourcedCards, readProfileSettings, storiesMapPath } from "@kairos/engine/settings";
 import type { SearchProfile } from "@kairos/engine/sourcing/types";
@@ -192,6 +193,16 @@ export interface ApplicationDetail {
   prepNotes: string[];
   /** The résumé's requirements coverage table (resume.json); null when absent (older résumés). */
   requirementCoverage: RequirementCoverageRow[] | null;
+  /** The verified fact each résumé line comes from (resume.json line_origins); null when there is no résumé. */
+  lineOrigins: LineOriginView | null;
+}
+
+export interface LineOriginView {
+  /** False for a résumé saved before origins were recorded: they are computed on read, from the record as it is now. */
+  saved: boolean;
+  lines: LineOrigin[];
+  /** "Company · Title" of each role, by its index in the résumé. */
+  roles: string[];
 }
 
 // Markdown files in an application folder that already have their own view.
@@ -263,7 +274,30 @@ export async function getApplication(id: string): Promise<ApplicationDetail | nu
     },
     prepNotes,
     requirementCoverage: readRequirementCoverage(resumeJson),
+    lineOrigins: await readLineOriginView(store, resumeJson),
   };
+}
+
+/**
+ * The line origins of the saved résumé. An older resume.json has none: they
+ * are computed here from the record. Advisory section only: any failure (a
+ * hand-edited file, an unreadable record) shows nothing rather than an error.
+ */
+async function readLineOriginView(store: ReturnType<typeof getStore>, gen: GeneratedResume | null): Promise<LineOriginView | null> {
+  if (!gen?.resume || !Array.isArray(gen.resume.experience)) return null;
+  try {
+    const saved = Array.isArray(gen.line_origins);
+    let candidateName: string | undefined;
+    if (!saved) {
+      const profileRaw = await store.readFile(["profile.md"]);
+      const name = profileRaw ? (matter(profileRaw).data as { name?: unknown }).name : undefined;
+      if (typeof name === "string") candidateName = name;
+    }
+    const { lines } = readLineOrigins(gen, saved ? [] : await loadExperiences(store), { candidateName });
+    return lines.length ? { saved, lines, roles: gen.resume.experience.map((e) => `${e.company} · ${e.title}`) } : null;
+  } catch {
+    return null;
+  }
 }
 
 const COVERAGE_STATUSES = new Set(["covered", "partial", "gap"]);
