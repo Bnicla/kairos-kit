@@ -15,9 +15,11 @@ import { NextResponse, type NextRequest } from "next/server";
  *   Another site's page cannot post a form or call a server action here. The
  *   extension's routes check their own token (lib/autofill.ts).
  *
- * The check reads headers. It does not choose the address the dashboard listens on: the Kit's scripts start it on
- * 127.0.0.1, and `next dev` started by hand listens on every interface, where a program on the same network that
- * writes its own Host header is not stopped by this check.
+ * The check reads headers. It does not choose the address the dashboard listens on: that is the second half of
+ * the protection, and it is in the commands that start the dashboard. `npm run dev` and `npm run start` (and with
+ * them the login service, and the Kit's own script) start it on 127.0.0.1, so no other computer of the network can
+ * reach it at all. `next dev` typed by hand without `-H 127.0.0.1` listens on every interface; there a program on
+ * the same network that writes its own Host header is not stopped by this check.
  */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
