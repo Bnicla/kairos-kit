@@ -58,6 +58,7 @@ export const SETUP_SECTIONS: SetupSection[] = [
       "profile.headline",
       "profile.summary",
       "profile.resume_choices",
+      "profile.resume_headings",
       "profile.languages",
       "profile.preferences.work_authorization",
       "autofill.contact",
@@ -219,6 +220,7 @@ export const SETTINGS: Record<string, SettingInfo & { asked?: false }> = {
   "profile.name": { file: "profile.md", effect: "Résumé header, file names, form autofill.", default: "Taken from the résumé." },
   "profile.contact_line": { file: "profile.md", effect: "Résumé contact line; health check.", default: "Taken from the résumé." },
   "profile.headline": { file: "profile.md", effect: "Tagline under the name on the résumé.", default: "No tagline." },
+  "profile.resume_headings": { file: "profile.md", effect: "The section headings of the résumé that the user renamed (\"Summary\" for \"Executive Summary\", \"Experience\" for \"Professional Experience\"). Every later résumé is written with them, in the Word file, the PDF and the application page.", default: "Executive Summary, Professional Experience, Projects, Education, Skills." },
   "profile.resume_choices": { file: "profile.md", effect: "Differences from the knowledge base that the user chose to keep on every résumé (a role written to Present, a skills line of their own): the résumé save does not raise them again. Each entry holds the user's own words and the day; remove one to have it raised again.", default: "None: every difference is raised." },
   "profile.summary": { file: "profile.md", effect: "The person's own summary of themselves, word for word. A count of years they state there is the figure a résumé keeps; a summary sentence may rest on it.", default: "None: the summary rests on the roles only." },
   "profile.skills": { file: "profile.md", effect: "The person's own list of skills, in their words. Given to scoring as stated skills, and a résumé's Skills section starts from it.", default: "No list: scoring and the Skills section use only the skills the roles show." },
@@ -344,6 +346,7 @@ export const PROFILE_SETTINGS_FIELDS: Record<keyof ProfileSettings, true> = {
   voice: true,
   stories_map: true,
   referrals: true,
+  resume_headings: true,
 };
 
 export function sectionByName(name: string): SetupSection | undefined {

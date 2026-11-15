@@ -462,4 +462,50 @@ describe("Kairos MCP server: the first import after a document was read", () => 
     const third = JSON.parse(text(await client.callTool({ name: "save_resume", arguments: { appId, resume } })));
     expect(third.put_right_before_showing.items).toHaveLength(1);
   }, 60_000);
+
+  it("the user asks to rename a section heading: it is saved as theirs with their approval, and the next résumé is written with it", async () => {
+    const appId = (await createApplication(new LocalStore(home), { company: "Quillstack", role: "Software Engineer", snapshotMarkdown: "# Software Engineer\nPython.", source_url_unavailable: true })).id;
+    const resume = {
+      resume: {
+        header: { name: "Jordan Example", contact: "Columbus, OH · jordan@example.com" },
+        executive_summary: "- **Intern:** Software Engineering Intern at Ledgerly.",
+        experience: [{ company: "Ledgerly", title: "Software Engineering Intern", dates: "Jun 2025 - Aug 2025", bullets: ["Built a dashboard the operations team uses daily."] }],
+        education: [],
+        skills: ["Python"],
+      },
+      provenance_audit: [{ claim: "Built a dashboard", source_experience: "01-ledgerly.md", prov: "R" }],
+    };
+    const headings = async () => (await new LocalStore(home).readFile(["applications", appId, "resume-source.md"]))!.split("\n").filter((l) => l.startsWith("## "));
+    await client.callTool({ name: "save_resume", arguments: { appId, resume } });
+    expect(await headings()).toEqual(["## Executive Summary", "## Professional Experience", "## Skills"]);
+
+    // "Call it Summary, and call the jobs Experience."
+    asked.length = 0;
+    answers.push({ action: "accept" });
+    const renamed = await client.callTool({ name: "save_profile", arguments: { resume_headings: { summary: "Summary", experience: "Experience" } } });
+    expect(renamed.isError, text(renamed)).toBeFalsy();
+    expect(asked[0]!.message).toContain('+ résumé heading: "Executive Summary" becomes "Summary" on every later résumé');
+    expect(asked[0]!.message).toContain('+ résumé heading: "Professional Experience" becomes "Experience" on every later résumé');
+    expect(readFileSync(join(home, "profile.md"), "utf8")).toMatch(/resume_headings:\n\s+summary: Summary\n\s+experience: Experience\n/);
+    await client.callTool({ name: "save_resume", arguments: { appId, resume } });
+    expect(await headings()).toEqual(["## Summary", "## Experience", "## Skills"]);
+    // The Writer's evidence names the user's headings.
+    // One heading renamed later leaves the other as it is; its default name puts the default back.
+    answers.push({ action: "accept" });
+    await client.callTool({ name: "save_profile", arguments: { resume_headings: { summary: "Executive Summary" } } });
+    expect(asked[asked.length - 1]!.message).toContain('+ résumé heading: "Summary" becomes "Executive Summary" on every later résumé');
+    await client.callTool({ name: "save_resume", arguments: { appId, resume } });
+    expect(await headings()).toEqual(["## Executive Summary", "## Experience", "## Skills"]);
+    // What is not a heading is refused before anything is asked.
+    const before = asked.length;
+    const bad = await client.callTool({ name: "save_profile", arguments: { resume_headings: { skills: "#" } } });
+    expect(bad.isError).toBe(true);
+    expect(text(bad)).toContain('"#" cannot be a section heading');
+    expect(asked).toHaveLength(before);
+    // A declined change leaves the headings as they were.
+    answers.push({ action: "decline" });
+    await client.callTool({ name: "save_profile", arguments: { resume_headings: { experience: "Work History" } } });
+    await client.callTool({ name: "save_resume", arguments: { appId, resume } });
+    expect(await headings()).toEqual(["## Executive Summary", "## Experience", "## Skills"]);
+  }, 60_000);
 });

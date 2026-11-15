@@ -73,7 +73,45 @@ export interface ProfileSettings {
   stories_map?: string;
   /** Which applications show the user's contacts at the company as possible referrals. */
   referrals?: ReferralSettings;
+  /** The section headings the user renamed (profile `resume_headings`); the others keep their default. */
+  resume_headings?: Partial<ResumeHeadings>;
 }
+
+/**
+ * The section headings of a résumé. The defaults are the owner's decision of 15 November 2026: "Keep them, but users
+ * can change them through conversation". A user renames one by asking; the choice is theirs, kept in their profile
+ * (`resume_headings`), and every later résumé of theirs is written with it.
+ */
+export interface ResumeHeadings {
+  summary: string;
+  experience: string;
+  projects: string;
+  education: string;
+  skills: string;
+}
+export const DEFAULT_RESUME_HEADINGS: ResumeHeadings = { summary: "Executive Summary", experience: "Professional Experience", projects: "Projects", education: "Education", skills: "Skills" };
+export const RESUME_HEADING_KEYS = Object.keys(DEFAULT_RESUME_HEADINGS) as (keyof ResumeHeadings)[];
+
+/** A heading as it can be written: one short line of plain text. Anything else is not a heading and is ignored. */
+export function cleanHeading(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.replace(/[#|*_`<>\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  return t.length >= 2 && t.length <= 40 && /\p{L}/u.test(t) ? t : undefined;
+}
+
+/** The headings a user renamed, out of a profile's `resume_headings`: only those that differ from the default. */
+export function renamedHeadings(value: unknown): Partial<ResumeHeadings> {
+  const out: Partial<ResumeHeadings> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const k of RESUME_HEADING_KEYS) {
+    const h = cleanHeading((value as Record<string, unknown>)[k]);
+    if (h && h.toLowerCase() !== DEFAULT_RESUME_HEADINGS[k].toLowerCase()) out[k] = h;
+  }
+  return out;
+}
+
+/** The five headings of a résumé: the user's where they renamed one, the default otherwise. */
+export const headingsFor = (renamed?: Partial<ResumeHeadings> | null): ResumeHeadings => ({ ...DEFAULT_RESUME_HEADINGS, ...renamedHeadings(renamed) });
 
 /** Where the deep-dives page reads the stories map when profile.md sets no `stories_map`. */
 export const DEFAULT_STORIES_MAP = "knowledge-base/stories-map.json";
@@ -129,6 +167,8 @@ export function readProfileSettings(profileRaw: string | null | undefined): Prof
     if (voice.replace_default_patterns === true) v.replace_default_patterns = true;
     out.voice = v;
   }
+  const headings = renamedHeadings(fm.resume_headings);
+  if (Object.keys(headings).length) out.resume_headings = headings;
   const map = str(fm.stories_map);
   if (map) out.stories_map = map;
   const ref = fm.referrals as Record<string, unknown> | undefined;

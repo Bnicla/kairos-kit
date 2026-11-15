@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import type { GeneratedResume } from "@kairos/engine/types";
 import { normalizeDateRangeDashes } from "@kairos/engine/ats-text";
+import { headingsFor } from "@kairos/engine/settings";
 
 /**
  * Render a generated resume to (a) an editable markdown source that round-trips
@@ -16,12 +17,14 @@ import { normalizeDateRangeDashes } from "@kairos/engine/ats-text";
 
 export function generatedResumeToMarkdown(gen: GeneratedResume): string {
   const r = gen.resume;
+  // The section headings: the user's own where they renamed one (the save puts them on the résumé), the default otherwise.
+  const h = headingsFor(r.headings);
   const lines: string[] = [];
   lines.push(`# ${r.header.name}`);
   if (r.header.contact) lines.push(r.header.contact);
   lines.push("");
   if (r.executive_summary) {
-    lines.push("## Executive Summary", "", r.executive_summary, "");
+    lines.push(`## ${h.summary}`, "", r.executive_summary, "");
   }
   // The person's own projects stand under "Projects", each headed by its name: a project has no employer and,
   // unless the person stated one, no title. Which rows are projects is the knowledge base's to say (the save sets `kind`).
@@ -29,7 +32,7 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
   const projects = r.experience.filter((e) => e.kind === "project");
   const education: string[] = [];
   if (r.education?.length) {
-    education.push("## Education", "");
+    education.push(`## ${h.education}`, "");
     for (const ed of r.education) {
       // A certificate whose issuer the person did not name is written with none.
       education.push(`- **${ed.credential}**${ed.institution?.trim() ? `, ${ed.institution.trim()}` : ""}${ed.dates ? ` (${ed.dates})` : ""}`);
@@ -38,7 +41,7 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
   }
   // A student or a recent graduate: the degree is the latest entry, and it stands first (decided by the save).
   if (r.education_first) lines.push(...education);
-  if (roles.length) lines.push("## Professional Experience", "");
+  if (roles.length) lines.push(`## ${h.experience}`, "");
   // Group consecutive roles at the same company under one company header, so
   // career progression at one employer reads as nested roles (matches a
   // company-centric resume layout). "### Company | Location" then "#### Role | Dates".
@@ -60,7 +63,7 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
     lines.push("");
   }
   if (projects.length) {
-    lines.push("## Projects", "");
+    lines.push(`## ${h.projects}`, "");
     for (const p of projects) {
       const title = p.title?.trim() && !/^project$/i.test(p.title.trim()) ? p.title.trim() : "";
       // "### Name | Dates": the name where an employer's would be, the dates where a place would be.
@@ -74,7 +77,7 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
   }
   if (!r.education_first) lines.push(...education);
   if (r.skills?.length) {
-    lines.push("## Skills", "", r.skills.join(" · "), "");
+    lines.push(`## ${h.skills}`, "", r.skills.join(" · "), "");
   }
   return normalizeDateRangeDashes(lines.join("\n").trim()) + "\n";
 }
@@ -91,6 +94,7 @@ export function generatedResumeToHtml(
   { forPrint = false }: { forPrint?: boolean } = {},
 ): string {
   const r = gen.resume;
+  const h = headingsFor(r.headings);
   const body = `
   <header class="r-head">
     <h1>${esc(r.header.name)}</h1>
@@ -98,11 +102,11 @@ export function generatedResumeToHtml(
   </header>
   ${
     r.executive_summary
-      ? `<section><h2>Executive Summary</h2><p>${esc(r.executive_summary)}</p></section>`
+      ? `<section><h2>${esc(h.summary)}</h2><p>${esc(r.executive_summary)}</p></section>`
       : ""
   }
   <section>
-    <h2>Professional Experience</h2>
+    <h2>${esc(h.experience)}</h2>
     ${r.experience
       .map(
         (exp) => `
@@ -118,7 +122,7 @@ export function generatedResumeToHtml(
   </section>
   ${
     r.education?.length
-      ? `<section><h2>Education</h2><ul>${r.education
+      ? `<section><h2>${esc(h.education)}</h2><ul>${r.education
           .map(
             (ed) =>
               `<li><strong>${esc(ed.credential)}</strong>${ed.institution?.trim() ? `, ${esc(ed.institution)}` : ""}${
@@ -130,7 +134,7 @@ export function generatedResumeToHtml(
   }
   ${
     r.skills?.length
-      ? `<section><h2>Skills</h2><p class="skills">${r.skills.map(esc).join(" · ")}</p></section>`
+      ? `<section><h2>${esc(h.skills)}</h2><p class="skills">${r.skills.map(esc).join(" · ")}</p></section>`
       : ""
   }`;
 

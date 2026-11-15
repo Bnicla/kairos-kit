@@ -759,6 +759,27 @@ export function checkResumeStretch(
     const of = scope ? `${scope} ` : "";
     const seen = new Set<string>();
     const bulletNorm = norm(bullet);
+    // "Leads retail engagements, including a grocery chain, a home goods retailer and a regional pharmacy chain": the
+    // lead is claimed of each thing the list names. Where the knowledge base says the candidate took part in one of
+    // them ("Supported the due diligence of a regional pharmacy chain… A partner led the engagement"), that is a
+    // drift, though the clause with the verb names none of them (the second run on other professions, 15 November 2026).
+    let leading: string | undefined;
+    for (const ts of clauses(bullet)) {
+      const opens = ts[0] === "i" ? ts[1] : ts[0];
+      if (opens && (LEAD_VERBS.has(opens) || opens === "lead" || opens === "leading")) leading = opens === "leading" || opens === "lead" ? "leads" : opens;
+      else if (opens && isVerb(opens)) leading = undefined;
+      else if (leading && !ts.some((w) => isVerb(w) || FINITE.has(w))) {
+        const items = ts.join(" ").split(/\s+(?:and|or)\s+/).map((x) => x.replace(/^(?:including|such as|like|from|across|for|with|among)\s+/, "").replace(/^(?:the|a|an)\s+/, "").split(" ").filter(Boolean));
+        for (const item of items) {
+          const drift = clauseDrift([leading, ...item], bulletNorm, sentences, false, false);
+          if (drift && !seen.has(`drift:${drift.trigger}`)) {
+            seen.add(`drift:${drift.trigger}`);
+            seen.add(drift.trigger);
+            flag("drift", drift.trigger, drift.detail);
+          }
+        }
+      }
+    }
     for (const ts of clauses(bullet)) {
       // The clause, and each part of it that starts a new action of the candidate's ("cut mis-picks … and kept the site …").
       // Only where the clause is the candidate's own action: after "the app was demonstrated to the class and used by

@@ -93,6 +93,7 @@ export const GeneratedResumeSchema = z.object({
     education: z.array(z.object({ institution: z.string(), credential: z.string(), dates: z.string().optional() })),
     skills: z.array(z.string()),
     education_first: z.boolean().optional(),
+    headings: z.object({ summary: z.string(), experience: z.string(), projects: z.string(), education: z.string(), skills: z.string() }).partial().optional(),
   }),
   // One claim, one source, one provenance token. "R/C" or "05/06/07" composites
   // defeat the audit's purpose and are rejected here.

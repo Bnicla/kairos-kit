@@ -171,6 +171,39 @@ const OPENING_VERBS = new Set(
 );
 
 /**
+ * The first word of a line and the one after it, past its list mark and its bold lead-in ("- **Hiring:** Hires,
+ * schedules…" opens on "Hires"). Until 15 November 2026 the lead-in's own asterisks were read as a list mark, and
+ * every line with a lead-in was skipped.
+ */
+function openingWord(line: string): { word: string; next: string } | null {
+  const m = /^\s*(?:[-•]\s+|\*\s+)?(?:\*\*[^*]*\*\*\s*)?([A-Za-z]+)[\s,]*([A-Za-z0-9$]*)/.exec(line);
+  return m ? { word: m[1]!, next: m[2] ?? "" } : null;
+}
+
+const AFTER_A_VERB = new Set("the a an all each every this these those my our its their second first third daily weekly monthly quarterly annual new two three four five six seven eight nine ten".split(" "));
+
+/**
+ * Lines that open in the present ("Run second shift", "Track the overtime hours") under a role the knowledge base
+ * says has ended: what is finished is said in the past. A word that is also a thing ("Lead engineer", "Support
+ * desk") is read as a verb only before a word that follows a verb ("the", a number, "weekly").
+ */
+export function presentInEndedRoles(gen: GeneratedResume, experiences: Experience[]): { company: string; word: string; line: string }[] {
+  const out: { company: string; word: string; line: string }[] = [];
+  for (const exp of gen.resume.experience) {
+    const own = experiences.filter((e) => e.frontmatter.company.toLowerCase().trim() === exp.company.toLowerCase().trim());
+    const titled = own.filter((e) => String(e.frontmatter.title ?? "").toLowerCase().trim() === (exp.title ?? "").toLowerCase().trim());
+    const entries = titled.length ? titled : own;
+    if (!entries.length || entries.some((e) => /^(present|current|now|today|ongoing|)$/i.test(String(e.frontmatter.end ?? "").trim()))) continue;
+    for (const line of [exp.summary ?? "", ...exp.bullets]) {
+      const o = openingWord(line);
+      if (!o || !/^[A-Z][a-z]+$/.test(o.word) || !OPENING_VERBS.has(o.word.toLowerCase())) continue;
+      if (AFTER_A_VERB.has(o.next.toLowerCase()) || /^[\d$]/.test(o.next)) out.push({ company: exp.company, word: o.word, line });
+    }
+  }
+  return out;
+}
+
+/**
  * Lines that open on a verb in the third person ("Builds the forecast", "Mentors two analysts"). A résumé's lines are
  * in the implied first person: "Build", "Mentor" for what is still done, "Built" for what is finished. One role of the
  * run on other professions had "Own…", "Builds…" and "Rebuilt…" (15 November 2026).
@@ -179,7 +212,7 @@ export function thirdPersonOpenings(gen: GeneratedResume): string[] {
   const lines = [...gen.resume.executive_summary.split("\n"), ...gen.resume.experience.flatMap((e) => [e.summary ?? "", ...e.bullets])];
   const out: string[] = [];
   for (const line of lines) {
-    const first = /^[\s\-*•]*(?:\*\*[^*]*\*\*\s*)?([A-Za-z]+)/.exec(line)?.[1];
+    const first = openingWord(line)?.word;
     if (!first || !/^[A-Z][a-z]+s$/.test(first) || /ss$/.test(first)) continue;
     const w = first.toLowerCase();
     const base = w.endsWith("ies") ? `${w.slice(0, -3)}y` : OPENING_VERBS.has(w.slice(0, -1)) ? w.slice(0, -1) : w.slice(0, -2);
@@ -280,7 +313,11 @@ export interface GroundingIssue {
     /** A count in the summary that stands on no line and that the roles could add up to. */
     | "composed_total"
     /** An education row with no entry to stand on, or an issuer given where the entry names none. */
-    | "education_differs";
+    | "education_differs"
+    /** A share given of another whole: "30% of the site's volume" in the knowledge base, "30% of the shift's volume" on the résumé. */
+    | "share_of_another_whole"
+    /** A figure the knowledge base gives for one year, stated without that year. */
+    | "year_left_out";
   detail: string;
   /** The line of the résumé the finding is about, when it is about one. */
   line?: string;
@@ -313,6 +350,8 @@ export const ADVISORY_GROUNDING: ReadonlySet<GroundingIssue["kind"]> = new Set([
   "unknown_audience",
   "composed_total",
   "education_differs",
+  "share_of_another_whole",
+  "year_left_out",
 ]);
 
 /** A text as a key: lower case, letters and digits, one space between words, cut short. */
@@ -376,6 +415,27 @@ export function rowDates(dates: string): { start: DatePoint; end: DatePoint } | 
  */
 const NEGATIVE =
   /(?:^|[.;,:(]\s*|\b(?:and|but|though|although|while)\s+)(?:I\s+)?(?:(?:did|do|was|am|have|had)\s+not|didn't|don't|wasn't|haven't|hadn't|never)\s+(?:[a-z]+)|\bnot\s+(?:responsible for|involved in|part of|the lead)\b|\bno\s+(?:direct|formal)\s+(?:reports?|responsibility|ownership|authority)\b/i;
+
+const SHARE_ENDS = new Set("is are was were be been for in at by to and or which that with from over during comes came goes went of on per as".split(" "));
+const SHARE_SKIPS = new Set("the a an its their our my all total overall".split(" "));
+
+/** Every "N% of <something>" in a text: the percentage, and the words that say what it is a share of. */
+export function sharesOf(text: string): { raw: string; percent: string; whole: string[] }[] {
+  const out: { raw: string; percent: string; whole: string[] }[] = [];
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s?%\s+of\s+((?:[\p{L}\p{N}'’-]+\s*){1,6})/gu)) {
+    const words: string[] = [];
+    const kept: string[] = [];
+    for (const w of m[2]!.trim().split(/\s+/)) {
+      const plain = w.toLowerCase().replace(/['’]s$/, "").replace(/[^\p{L}\p{N}]/gu, "");
+      if (SHARE_ENDS.has(plain)) break;
+      kept.push(w);
+      if (plain && !SHARE_SKIPS.has(plain)) words.push(plain.length > 4 ? plain.replace(/s$/, "") : plain);
+      if (words.length === 4) break;
+    }
+    if (words.length) out.push({ raw: `${m[1]}% of ${kept.join(" ")}`, percent: m[1]!, whole: words });
+  }
+  return out;
+}
 
 const AUDIENCE_VERB = /\b(?:present|report|brief|pitch|demonstrat|demo|recommend|escalat|communicat|explain|show|deliver)(?:e|ed|s|es|ing|ted|ting|ned|ning)?\b[^.;:!?]{0,80}?\bto\s+((?:(?:the|a|an|its|their|senior|executive|company|division|plant|site|regional|global|client|c)\s+|-)*[a-z][a-z-]*)/gi;
 const AUDIENCES = new Set("leadership executives executive management board ceo cfo coo cto cio vp vps directors director stakeholders investors clients client customers customer partners regulators committee suite managers manager leaders".split(" "));
@@ -654,6 +714,52 @@ export function checkResumeGrounding(
         key: keyOf("dates", exp.company, `${found.start.year} ${found.end.present ? "present" : found.end.year}`),
         detail: worded`"${exp.dates}" under "${exp.company}": the knowledge base holds ${own.map((e) => `${String(e.frontmatter.start ?? "?")} to ${String(e.frontmatter.end ?? "?")}`).join("; ")} for that entry. Write its dates as they are`,
       });
+    }
+  }
+
+  // A share keeps its whole, and a figure of one year keeps its year. Seen in the second run on other professions
+  // (15 November 2026): "about 30% of Sierra Crest's volume" became "about 30% of the shift's volume", and "kept
+  // on-time departure above 97% in 2015" became, in the summary, "kept on-time departure above 97%".
+  const scopes = [
+    { where: "summary", text: gen.resume.executive_summary, evidence: evidenceAll },
+    ...gen.resume.experience.flatMap((exp) => {
+      const own = rawByCompany.get(exp.company.toLowerCase().trim());
+      return own === undefined ? [] : [exp.summary ?? "", ...exp.bullets].map((text) => ({ where: `under "${exp.company}"`, text, evidence: `${own}\n${extraCorpus}` }));
+    }),
+  ];
+  for (const unit of scopes) {
+    const held = unit.evidence.split(/\n|(?<=[.;])\s+/);
+    for (const sentence of unit.text.split(/(?<=[.;!?])\s+|\n+/)) {
+      for (const share of sharesOf(sentence)) {
+        const theirs = held.flatMap((l) => sharesOf(l)).filter((x) => x.percent === share.percent);
+        if (!theirs.length || theirs.some((x) => share.whole.every((w) => x.whole.includes(w)))) continue;
+        // Only the same thing given to another owner: "the shift's volume" for "Sierra Crest's volume". The same share
+        // said in other words ("of support requests" for "of tickets") is a rewording, not another whole; read as a
+        // finding it was raised on thirty of the owner's own résumés.
+        const head = share.whole[share.whole.length - 1];
+        if (!theirs.some((x) => x.whole[x.whole.length - 1] === head)) continue;
+        issues.push({
+          kind: "share_of_another_whole",
+          key: keyOf("share", share.raw),
+          line: sentence.trim(),
+          detail: worded`"${share.raw}" (${unit.where}): the knowledge base gives this share of something else ("${theirs[0]!.raw}"). Say what it is a share of in the person's own words`,
+        });
+      }
+      // Only a rate: "above 97% in 2015" is a figure of that year. The year in "a $2.1M packing line in 2023" says
+      // when the work was done, and a line may leave it out.
+      for (const token of extractMetricTokens(sentence).filter((t) => t.raw.includes("%"))) {
+        const lines = held.filter((l) => normalizeMetrics(l).includes(token.normalized));
+        const years = lines.map((l) => /\b(?:in|during|for|through|throughout|over)\s+((?:19|20)\d{2})(?:\s*[-–]\s*((?:19|20)\d{2}|\d{2}))?\b/.exec(l));
+        if (!lines.length || years.some((y) => !y)) continue;
+        const given = [...new Set(years.map((y) => y![1]!))];
+        if (given.some((y) => sentence.includes(y))) continue;
+        issues.push({
+          kind: "year_left_out",
+          key: keyOf("year", token.raw, given.join(" ")),
+          line: sentence.trim(),
+          detail: worded`"${token.raw}" (${unit.where}): the knowledge base gives this figure for ${given.join(" and ")} ("${lines[0]!.replace(/^\s*[-*]\s+/, "").replace(/\s*\[[RCF]\]\s*$/, "").trim().slice(0, 120)}"). Say the year with it, or leave the figure out`,
+        });
+      }
     }
   }
 

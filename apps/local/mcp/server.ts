@@ -102,6 +102,7 @@ import { markdownResumeToDocx, markdownLetterToDocx, type TemplateSpec } from "@
 import { checkProse, hardProseViolations } from "@kairos/engine/tools/prose-checks";
 import { leadingQuestions } from "@kairos/engine/tools/checks";
 import { resumeLengthPolicy } from "@kairos/engine/length-policy";
+import { DEFAULT_RESUME_HEADINGS, RESUME_HEADING_KEYS, cleanHeading, headingsFor, renamedHeadings } from "@kairos/engine/settings";
 import { loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import { worded, wordedText } from "@kairos/engine/wording";
 import { listTracks, resolveTrack, saveTrack, trackGuidance, TrackStatus, EvidenceMapItem, MAIN_TRACK_ID, MAX_ACTIVE_TRACKS } from "@kairos/engine/tracks";
@@ -1192,6 +1193,20 @@ server.registerTool(
   guard(async (fields) => {
     const existing = await readProfile();
     const update = clean(fields) as Record<string, unknown>;
+    // Headings the user renamed: only real headings are kept, and one given its default name goes back to the default.
+    if (update.resume_headings && typeof update.resume_headings === "object") {
+      const was = renamedHeadings(existing.resume_headings);
+      const given = update.resume_headings as Record<string, unknown>;
+      const next: Record<string, string> = { ...was };
+      for (const k of RESUME_HEADING_KEYS) {
+        if (given[k] === undefined) continue;
+        const h = cleanHeading(given[k]);
+        if (!h) return fail(`"${String(given[k])}" cannot be a section heading: a heading is one short line of plain text (2 to 40 characters). Nothing was saved.`);
+        if (h.toLowerCase() === DEFAULT_RESUME_HEADINGS[k].toLowerCase()) delete next[k];
+        else next[k] = h;
+      }
+      update.resume_headings = next;
+    }
     for (const k of ["preferences", "voice", "referrals"]) {
       const was = existing[k];
       if (update[k] && was && typeof was === "object" && !Array.isArray(was)) {
@@ -1218,7 +1233,14 @@ server.registerTool(
       update.resume_choices = kept;
     }
     const merged = { ...existing, ...update };
-    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip([...changedFields(existing, update, ["resume_choices"]), ...choiceLines]));
+    const headingLines = update.resume_headings
+      ? RESUME_HEADING_KEYS.flatMap((k) => {
+          const before = headingsFor(existing.resume_headings as never)[k];
+          const after = headingsFor(update.resume_headings as never)[k];
+          return before === after ? [] : [`+ résumé heading: "${before}" becomes "${after}" on every later résumé`];
+        })
+      : [];
+    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip([...changedFields(existing, update, ["resume_choices", "resume_headings"]), ...choiceLines, ...headingLines]));
     if (refused) return fail(refused);
     const body =
       "# Candidate profile\n\nIdentity and targeting used to prioritize roles and ground generation.\n";
@@ -2149,6 +2171,7 @@ server.registerTool(
       statedSkills: strings(profile.skills),
       languages: strings(profile.languages),
       ownSummary: typeof profile.summary === "string" ? profile.summary : undefined,
+      headings: headingsFor(profile.resume_headings as never),
       // One page or two: by the years the knowledge base covers and by how much it holds, or the person's own setting.
       // (Until 15 November 2026 nothing was passed, and every Writer was told to fill two pages.)
       targetPages: resumeLengthPolicy(experiences, { override: profile.target_pages === 1 || profile.target_pages === 2 ? profile.target_pages : undefined }).targetPages,

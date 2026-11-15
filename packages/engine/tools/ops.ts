@@ -33,6 +33,7 @@ import {
   type RequirementCoverageSummary,
   type StyleViolation,
   resolveStylePolicy,
+  presentInEndedRoles,
   thirdPersonOpenings,
   type StylePolicy,
 } from "@kairos/engine/tools/checks";
@@ -207,6 +208,10 @@ export function sayOf(kind: string, thing: string, line: string | undefined): st
       return `The summary says "${thing}". The figure you give of yourself is another.`;
     case "years_from_dates":
       return `The summary says "${thing}". You have not stated that figure yourself: it was worked out from your dates. Is it right for what the sentence says?`;
+    case "share_of_another_whole":
+      return `A line says "${thing}". Your knowledge base gives that share of something else.`;
+    case "year_left_out":
+      return `The figure "${thing}" is on this résumé without its year. Your knowledge base gives it for one year.`;
     case "composed_total":
       return `The summary gives "${thing}". No line of your knowledge base states that count.`;
     case "skill_not_held":
@@ -380,6 +385,10 @@ export async function saveGeneratedResume(
   }
   if (educationStandsFirst(gen, experiences)) gen.resume.education_first = true;
   else delete gen.resume.education_first;
+  // The section headings are the user's own where they renamed one (profile `resume_headings`); nothing the model sends counts.
+  const renamed = readProfileSettings(profileRaw).resume_headings;
+  if (renamed) gen.resume.headings = renamed;
+  else delete gen.resume.headings;
   gen.resume.executive_summary = summaryAsBullets(gen.resume.executive_summary);
   const extraCorpus = [
     profileRaw,
@@ -491,6 +500,11 @@ export async function saveGeneratedResume(
   }
   for (const v of style.filter((x) => x.rule === "first-person" || x.rule === "verb-form")) {
     found.push({ key: v.rule, kind: v.rule, what: v.rule === "first-person" ? `${v.detail}. Take the pronoun out; the fact stays as it is` : `${v.detail}`, say: sayOf(v.rule, /"([^"]+)"/.exec(v.detail)?.[1] ?? "", undefined) });
+  }
+
+  // The present tense under a role that has ended.
+  for (const t of presentInEndedRoles(gen, experiences)) {
+    found.push({ key: keyOf("tense", t.company, t.word), kind: "present_in_an_ended_role", line: t.line, what: `"${t.word}" (${t.company}): this role has ended in the knowledge base, and the line opens in the present. Write it in the past`, say: `A line under ${t.company} opens in the present ("${t.word}"). Your knowledge base has that role as ended.` });
   }
 
   // Page-fill safety net (portable). The AUTHORITATIVE check is the visual

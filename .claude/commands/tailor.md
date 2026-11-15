@@ -100,4 +100,10 @@ This is the Writer's work.
    what the ad asks for. A skill on their own list is theirs: ask where they
    used it, never whether they have it.
 
+The section headings ("Executive Summary", "Professional Experience",
+"Projects", "Education", "Skills") can be renamed when the student asks ("call
+it Summary", "call it Experience"): `save_profile({ resume_headings: { summary:
+"Summary" } })`, which they approve; then `save_resume` again. Every later
+résumé of theirs is written with their heading. Do not offer this unasked.
+
 Never add a fact, number, title or tool that is not in the knowledge base.

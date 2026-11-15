@@ -8,8 +8,12 @@ import { parseExperience } from "@kairos/engine/kb/experience";
 import { GENERATION_SYSTEM_PROMPT, buildGenerationUserMessage } from "@kairos/engine/prompts/generation";
 import { EXTRACTION_SYSTEM_PROMPT, buildExtractionUserMessage } from "@kairos/engine/prompts/extraction";
 import { SCORING_SYSTEM_PROMPT, profileFactsFrom } from "@kairos/engine/prompts/scoring";
-import { generatedResumeToMarkdown } from "@kairos/engine/resume-render";
-import { ADVISORY_GROUNDING, checkResumeGrounding, checkResumePerson, educationRef, isHardStyleViolation, leadingQuestions, namesEducation, rowDates, thirdPersonOpenings, titleHeld, unknownAudiences } from "@kairos/engine/tools/checks";
+import { generatedResumeToHtml, generatedResumeToMarkdown } from "@kairos/engine/resume-render";
+import { DEFAULT_RESUME_HEADINGS, cleanHeading, headingsFor, readProfileSettings, renamedHeadings } from "@kairos/engine/settings";
+import { atsExpectFromMarkdown } from "@kairos/engine/ats-text";
+import { loadLineOriginView, originGroups } from "@kairos/engine/line-origin-view";
+import { ADVISORY_GROUNDING, checkResumeGrounding, checkResumePerson, educationRef, isHardStyleViolation, leadingQuestions, namesEducation, presentInEndedRoles, rowDates, sharesOf, thirdPersonOpenings, titleHeld, unknownAudiences } from "@kairos/engine/tools/checks";
+import { checkResumeStretch } from "@kairos/engine/stretch";
 import { resumeLengthPolicy } from "@kairos/engine/length-policy";
 import { SaveRefused, educationStandsFirst, repeatedIntros, saveGeneratedResume, summaryAsBullets } from "@kairos/engine/tools/ops";
 import { checkYears, dateAsYears, entriesNamed, yearClaims, yearsCovered } from "@kairos/engine/tools/years";
@@ -670,5 +674,181 @@ describe("guardrails: what the knowledge base does not hold is found, and told; 
     const claudes = summaryMessage(items("Seasoned finance professional with eight years of experience."), ["resume.pdf"])!;
     expect(claudes).toContain("Not in your document: the summary of yourself (Claude worded it) (your profile). Check it.");
     expect(EXTRACTION_SYSTEM_PROMPT).toContain("candidate.summary is the resume's summary or objective about the person as a whole (the paragraph under the name), word for word and complete");
+  });
+});
+
+/**
+ * What still reached the person with no warning in the second run on the five people (15 November 2026, Sonnet, on
+ * main at 6ede64c): each is a case here, with what is found now.
+ */
+describe("the second run's three leftovers", () => {
+  const ended = entry("02-northwind-shipping.md", "id: northwind-shipping\ncompany: Northwind Distribution\ntitle: 'Team Lead, Shipping'\nstart: '2012-02'\nend: '2016-05'", ["Led 9 loaders on the outbound dock, 40 to 55 trailers a night.", "Kept on-time departure above 97% in 2015."]);
+  const current = parseExperience(
+    "01-northwind-supervisor.md",
+    "---\nid: northwind-supervisor\ncompany: Northwind Distribution\ntitle: Warehouse Operations Supervisor\nstart: '2016-05'\nend: present\n---\n\n## Achievements\n- Run second shift at a 220,000 square foot distribution center: 34 associates and 3 team leads. [R]\n- Hire, schedule and train for the shift; trained 60 new associates since 2019. [R]\n- Built the payback analysis for a $2.1M automated packing line in 2023. [R]\n\n## Context & responsibilities\nAbout 30% of Northwind's volume is each-picks for online retailers, which my shift handles. [C]\n",
+  );
+  const warehouse = [current, ended];
+  const sup = (over: Partial<GeneratedResume["resume"]["experience"][number]> = {}) => ({ company: "Northwind Distribution", title: "Warehouse Operations Supervisor", dates: "May 2016 - Present", bullets: ["Run second shift at a 220,000 square foot distribution center: 34 associates and 3 team leads."], ...over });
+  const lead = (over: Partial<GeneratedResume["resume"]["experience"][number]> = {}) => ({ company: "Northwind Distribution", title: "Team Lead, Shipping", dates: "Feb 2012 - May 2016", bullets: ["Led 9 loaders on the outbound dock, 40 to 55 trailers a night."], ...over });
+  const cv = (summary: string, experience: GeneratedResume["resume"]["experience"]) => resume({ summary, experience, audit: [{ claim: "Run second shift", source_experience: "01-northwind-supervisor.md", prov: "R" }] });
+  const of = (g: GeneratedResume, kind: string) => details(g, warehouse).filter((d) => d.startsWith(`[${kind}]`));
+
+  it("1. a lead claimed over a list of things: where the knowledge base says the person took part in one of them, it is found", () => {
+    const facts = [...consulting];
+    const pharmacy = entry("02-harborline-consultant.md", "id: harborline-consultant\ncompany: Harborline Advisory\ntitle: Consultant\nstart: '2020-07'\nend: '2022-08'", [
+      "Analyst then consultant on 7 engagements: market sizing, customer surveys, cost benchmarking.",
+      "Supported the due diligence of a regional pharmacy chain for a private equity client: built the store-level profitability model. A partner led the engagement.",
+    ]);
+    const grocery = entry("01-harborline-senior.md", "id: harborline-senior\ncompany: Harborline Advisory\ntitle: Senior Consultant\nstart: '2022-09'\nend: present", [
+      "Workstream lead on 5 engagements for retail and consumer goods clients; teams of 2 to 3 consultants.",
+      "For a grocery chain of 85 stores, led the pricing workstream: built the price-elasticity analysis for 12 categories.",
+      "For a home goods retailer, built the store labor model that the client used to set schedules in 140 stores.",
+    ]);
+    const kb = [grocery, pharmacy, facts[2]!];
+    const stretch = (summary: string) => checkResumeStretch(resume({ summary }), kb).map((f) => `${f.rule}:${f.trigger}`);
+    // The run's own sentence.
+    expect(stretch("- **Retail Consulting Leadership:** Leads retail and consumer goods engagements at Harborline Advisory, including a grocery chain, a home goods retailer and a regional pharmacy chain.")).toEqual(["drift:leads"]);
+    expect(checkResumeStretch(resume({ summary: "Leads retail engagements, including a regional pharmacy chain." }), kb)[0]!.detail).toBe(
+      'the knowledge base says "supported the due diligence of a regional pharmacy chain for a private equity client": the candidate took part, the bullet says "leads"',
+    );
+    // Without the thing they only took part in, or said as the fact says it, nothing is found.
+    expect(stretch("- **Retail Consulting:** Leads workstreams on retail and consumer goods engagements, including a grocery chain and a home goods retailer.")).toEqual([]);
+    expect(stretch("- **Retail Consulting:** Workstream lead on retail and consumer goods engagements; supported the due diligence of a regional pharmacy chain.")).toEqual([]);
+  });
+
+  it("2. a share keeps what it is a share of", () => {
+    expect(sharesOf("About 30% of Northwind's volume is each-picks; cut mis-picks from 1.9% to 0.7% of order lines.")).toEqual([
+      { raw: "30% of Northwind's volume", percent: "30", whole: ["northwind", "volume"] },
+      { raw: "0.7% of order lines", percent: "0.7", whole: ["order", "line"] },
+    ]);
+    const moved = cv("Warehouse Operations Supervisor at Northwind Distribution.", [sup({ bullets: ["**E-Commerce Fulfillment:** About 30% of the shift's volume is each-picks for online retailers."] })]);
+    expect(of(moved, "share_of_another_whole")).toEqual([
+      '[share_of_another_whole] "30% of the shift\'s volume" (under "Northwind Distribution"): the knowledge base gives this share of something else ("30% of Northwind\'s volume"). Say what it is a share of in the person\'s own words',
+    ]);
+    expect(of(cv("Warehouse Operations Supervisor at Northwind Distribution.", [sup({ bullets: ["About 30% of Northwind's volume is each-picks for online retailers, which the shift handles."] })]), "share_of_another_whole")).toEqual([]);
+    expect(ADVISORY_GROUNDING.has("share_of_another_whole")).toBe(true);
+  });
+
+  it("2. a rate the knowledge base gives for one year keeps its year; the year of a piece of work may be left out", () => {
+    const summary = "- **Operational Results:** Run second shift at a 220,000 square foot distribution center and kept on-time departure above 97%.";
+    expect(of(cv(summary, [sup(), lead()]), "year_left_out")).toEqual([
+      '[year_left_out] "97%" (summary): the knowledge base gives this figure for 2015 ("Kept on-time departure above 97% in 2015."). Say the year with it, or leave the figure out',
+    ]);
+    expect(of(cv(`${summary.slice(0, -1)} in 2015.`, [sup(), lead()]), "year_left_out")).toEqual([]);
+    expect(of(cv("Warehouse Operations Supervisor at Northwind Distribution.", [sup(), lead({ bullets: ["Kept on-time departure above 97% in 2015."] })]), "year_left_out")).toEqual([]);
+    // "$2.1M … in 2023" says when the work was done.
+    expect(of(cv("Warehouse Operations Supervisor at Northwind Distribution.", [sup({ bullets: ["Built the payback analysis for a $2.1M automated packing line."] })]), "year_left_out")).toEqual([]);
+  });
+
+  it("3. the third person is found behind a bold lead-in and a list mark (it was not), and the present tense under a role that has ended", () => {
+    const g = cv("- **Shift Leadership:** Runs the second shift at a 220,000 square foot distribution center.\n- **Safety:** Serves on the site safety committee.", [
+      sup({ summary: "Run second shift at a 220,000 square foot distribution center: 34 associates and 3 team leads.", bullets: ["**Hiring and Training:** Hires, schedules and trains for the shift; trained 60 new associates since 2019.", "**Labor Planning:** Track the shift's overtime hours.", "**Sales Operations:** Sales and plant controllers build the forecast."] }),
+      lead({ bullets: ["**Outbound Operations:** Lead 9 loaders on the outbound dock.", "Run the outbound dock, 40 to 55 trailers a night.", "Lead engineer on the dock layout.", "Kept on-time departure above 97% in 2015."] }),
+    ]);
+    expect(thirdPersonOpenings(g)).toEqual(["Runs", "Serves", "Hires"]);
+    // In the current role the present is right ("Run", "Track"). In the role that ended in 2016 it is not.
+    expect(presentInEndedRoles(g, warehouse).map((t) => [t.company, t.word])).toEqual([
+      ["Northwind Distribution", "Lead"],
+      ["Northwind Distribution", "Run"],
+    ]);
+    expect(presentInEndedRoles(cv("x", [sup(), lead()]), warehouse)).toEqual([]);
+  });
+
+  it("the save returns each of them with the sentence the user reads", async () => {
+    const store = new LocalStore(await mkdtemp(path.join(tmpdir(), "kairos-left-")));
+    for (const e of warehouse) await store.writeFile(["knowledge-base", "experiences", e.fileName], `---\nid: ${e.frontmatter.id}\ncompany: ${e.frontmatter.company}\ntitle: '${e.frontmatter.title}'\nstart: '${e.frontmatter.start}'\nend: ${e.frontmatter.end === "present" ? "present" : `'${e.frontmatter.end}'`}\n---\n\n${e.body}\n`);
+    const app = await createApplication(store, { company: "Quillstack", role: "Operations Manager", snapshotMarkdown: "# Operations Manager\nShifts.", source_url_unavailable: true });
+    const g = cv("- **Operational Results:** Run second shift at a 220,000 square foot distribution center and kept on-time departure above 97%.", [
+      sup({ bullets: ["**E-Commerce Fulfillment:** About 30% of the shift's volume is each-picks for online retailers.", "**Hiring and Training:** Hires, schedules and trains for the shift; trained 60 new associates since 2019."] }),
+      lead({ bullets: ["Run the outbound dock, 40 to 55 trailers a night."] }),
+    ]);
+    const res = await saveGeneratedResume(store, app.id, g, { whenItDiffers: "warn" });
+    const say = Object.fromEntries(res.findings.put_right.map((f) => [f.kind, f.say]));
+    expect(say).toMatchObject({
+      share_of_another_whole: 'A line says "30% of the shift\'s volume". Your knowledge base gives that share of something else.',
+      year_left_out: 'The figure "97%" is on this résumé without its year. Your knowledge base gives it for one year.',
+      "verb-form": 'A line opens in the third person ("Hires").',
+      present_in_an_ended_role: 'A line under Northwind Distribution opens in the present ("Run"). Your knowledge base has that role as ended.',
+    });
+  });
+});
+
+/**
+ * The owner's decision on the headings (15 November 2026): "Keep them, but users can change them through
+ * conversation". The defaults are his; a user who asks gets their own, on every later résumé.
+ */
+describe("a résumé's section headings: the defaults stay, and a user can rename one", () => {
+  const full = () => {
+    const g = resume({ education: [{ institution: "State University", credential: "MBA", dates: "2020" }], skills: ["SQL"] });
+    g.resume.experience.push({ company: "Campus Shuttle Tracker", kind: "project", title: "", dates: "2026", bullets: ["Built the backend."] });
+    return g;
+  };
+  const sections = (md: string) => md.split("\n").filter((l) => l.startsWith("## "));
+
+  it("with nothing renamed the headings are the ones they were", () => {
+    expect(sections(generatedResumeToMarkdown(full()))).toEqual(["## Executive Summary", "## Professional Experience", "## Projects", "## Education", "## Skills"]);
+    expect(headingsFor(undefined)).toEqual(DEFAULT_RESUME_HEADINGS);
+    expect(readProfileSettings("---\nname: Jordan Example\n---\n").resume_headings).toBeUndefined();
+  });
+
+  it("reads the renamed ones from the profile, and nothing that is not a heading", () => {
+    expect(readProfileSettings("---\nresume_headings:\n  summary: Summary\n  experience: Experience\n---\n").resume_headings).toEqual({ summary: "Summary", experience: "Experience" });
+    // The default's own name is not a renaming; markup, a line break and an empty or overlong text are not headings.
+    expect(renamedHeadings({ summary: "Executive Summary", experience: "  Work history  ", education: "## Schools | here", skills: "", projects: "x".repeat(41) })).toEqual({ experience: "Work history", education: "Schools here" });
+    for (const bad of ["", " ", "#", "12", "x".repeat(41), 7, null]) expect(cleanHeading(bad), String(bad)).toBeUndefined();
+    expect(headingsFor({ summary: "Summary" })).toEqual({ ...DEFAULT_RESUME_HEADINGS, summary: "Summary" });
+  });
+
+  it("the save writes the user's headings into the résumé, the Word file's source and the page's view; the checks that read sections follow", async () => {
+    const store = new LocalStore(await mkdtemp(path.join(tmpdir(), "kairos-headings-")));
+    for (const e of consulting) await store.writeFile(["knowledge-base", "experiences", e.fileName], `---\nid: ${e.frontmatter.id}\ncompany: ${e.frontmatter.company}\ntitle: ${e.frontmatter.title}\nstart: '${e.frontmatter.start}'\nend: ${e.frontmatter.end === "present" ? "present" : `'${e.frontmatter.end}'`}\n---\n\n${e.body}\n`);
+    await store.writeFile(["knowledge-base", "education", "mba.md"], "---\ninstitution: State University\ncredential: MBA\ndates: '2020'\n---\n\n- MBA, State University, 2020. [R]\n");
+    await store.writeFile(["profile.md"], "---\nname: Jordan Example\nresume_headings:\n  summary: Summary\n  experience: Experience\n---\n# Candidate profile\n");
+    const app = await createApplication(store, { company: "Quillstack", role: "Engagement Manager", snapshotMarkdown: "# Engagement Manager\nRetail.", source_url_unavailable: true });
+    const g = resume({
+      summary: "Senior Consultant at Harborline Advisory.",
+      experience: [{ company: "Harborline Advisory", title: "Senior Consultant", dates: "Sep 2022 - Present", bullets: ["Workstream lead on 5 engagements for retail and consumer goods clients; teams of 2 to 3 consultants."] }],
+      education: [{ institution: "State University", credential: "MBA", dates: "2020" }],
+    });
+    // A heading the model sends is not the user's: only the profile's counts.
+    g.resume.headings = { summary: "Career Highlights", skills: "Superpowers" };
+    const res = await saveGeneratedResume(store, app.id, g);
+    expect(res.findings).toEqual({ put_right: [], tell_user: [], kept_by_choice: [] });
+    const md = (await store.readFile(["applications", app.id, "resume-source.md"]))!;
+    expect(sections(md)).toEqual(["## Summary", "## Experience", "## Education"]);
+    const saved = JSON.parse((await store.readFile(["applications", app.id, "resume.json"]))!) as GeneratedResume;
+    expect(saved.resume.headings).toEqual({ summary: "Summary", experience: "Experience" });
+    // The Word file is written from that source: its text holds the renamed headings and not the defaults.
+    const { default: JSZip } = await import("jszip");
+    const xml = await (await JSZip.loadAsync((await store.readBinary(["applications", app.id, "resume.docx"]))!)).file("word/document.xml")!.async("string");
+    expect(xml.toUpperCase()).toContain(">SUMMARY<");
+    expect(xml.toUpperCase()).toContain(">EXPERIENCE<");
+    expect(xml.toUpperCase()).not.toContain("EXECUTIVE SUMMARY");
+    expect(xml.toUpperCase()).not.toContain("PROFESSIONAL EXPERIENCE");
+    // What the layout and the text-layer check expect is read from the résumé's own headings.
+    expect(atsExpectFromMarkdown(md)).toMatchObject({ sectionOrder: ["Summary", "Experience", "Education"], companiesSection: "Experience", companies: ["Harborline Advisory"] });
+    // The application page names the summary as the user does.
+    const view = (await loadLineOriginView(store, saved))!;
+    expect(view.summaryHeading).toBe("Summary");
+    expect(originGroups(view).map((x) => x.label)).toEqual(["Summary", "Harborline Advisory · Senior Consultant"]);
+    // Someone who renamed nothing: no heading on the résumé, and the page's label as before.
+    await store.writeFile(["profile.md"], "---\nname: Jordan Example\n---\n# Candidate profile\n");
+    await saveGeneratedResume(store, app.id, g);
+    const plain = JSON.parse((await store.readFile(["applications", app.id, "resume.json"]))!) as GeneratedResume;
+    expect(plain.resume.headings).toBeUndefined();
+    expect(sections((await store.readFile(["applications", app.id, "resume-source.md"]))!)).toEqual(["## Executive Summary", "## Professional Experience", "## Education"]);
+    expect(originGroups((await loadLineOriginView(store, plain))!)[0]!.label).toBe("Executive summary");
+  });
+
+  it("the Writer is given the user's headings and told that the save writes them; the HTML preview uses them too", () => {
+    const message = buildGenerationUserMessage({ jobText: "x", detectedAts: "unknown", company: "Quillstack", title: "Analyst", scoreReport: {} as never, experiences: consulting, educationRaw: [], voiceProfile: null, summaryBlocks: null, recruiterFeedback: null, headings: headingsFor({ summary: "Summary" }) });
+    expect(message).toContain('"sections": [\n      "Summary",\n      "Professional Experience",\n      "Education",\n      "Skills"\n    ]');
+    expect(GENERATION_SYSTEM_PROMPT).toContain("the section headings given in template.sections (the save step writes them; never invent a label of your own)");
+    const g = full();
+    g.resume.headings = { summary: "Summary", experience: "Experience" };
+    const html = generatedResumeToHtml(g);
+    expect(html).toContain("<h2>Summary</h2>");
+    expect(html).toContain("<h2>Experience</h2>");
+    expect(html).not.toContain("Executive Summary");
   });
 });

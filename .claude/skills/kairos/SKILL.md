@@ -373,6 +373,12 @@ gives the same measure for a file that was rendered again by hand. The
 one-click button path does this loop automatically. The engine's word-count
 gate is the portable fallback when LibreOffice is absent.
 
+**Section headings.** The save writes the headings ("Executive Summary",
+"Professional Experience", "Projects", "Education", "Skills"). When the user
+asks to rename one ("call it Summary"), save it as theirs:
+`save_profile({ resume_headings: { summary: "Summary" } })`, then save the
+résumé again; every later résumé uses it. Do not offer this unasked.
+
 **Editing a saved résumé** (lesson from a rendering bug): never hand-edit
 `resume-source.md` — scripted string edits drift from `resume.json` and break
 the markdown list structure that bold parsing depends on. Edit `resume.json`,

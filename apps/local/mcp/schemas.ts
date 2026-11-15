@@ -14,6 +14,16 @@ export const saveProfileShape = {
     .array(z.string())
     .optional()
     .describe("Languages with level, e.g. ['English (native)', 'Spanish (professional)']; given to scoring"),
+  resume_headings: z
+    .object({
+      summary: z.string().max(40).optional().describe('The heading of the summary; default "Executive Summary"'),
+      experience: z.string().max(40).optional().describe('The heading of the jobs; default "Professional Experience"'),
+      projects: z.string().max(40).optional().describe('The heading of the person\'s own projects; default "Projects"'),
+      education: z.string().max(40).optional().describe('Default "Education"'),
+      skills: z.string().max(40).optional().describe('Default "Skills"'),
+    })
+    .optional()
+    .describe("Section headings of the résumé that the user asked to rename (\"call it Summary\", \"call it Experience\"). Only on their request, and only the ones they named: the others keep what is on file. Every later résumé is written with them; giving a heading its default name puts the default back"),
   resume_choices: z
     .array(
       z.object({

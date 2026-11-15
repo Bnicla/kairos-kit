@@ -117,6 +117,8 @@ export interface GeneratedResume {
     skills: string[];
     /** Set by the save, never by the model: education stands before experience (a student, a recent graduate). */
     education_first?: boolean;
+    /** Set by the save, never by the model: the section headings the user renamed (profile `resume_headings`). */
+    headings?: { summary?: string; experience?: string; projects?: string; education?: string; skills?: string };
   };
   provenance_audit: {
     claim: string;

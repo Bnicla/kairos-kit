@@ -8,6 +8,7 @@
 import matter from "./front-matter";
 import { loadEducation, loadExperiences } from "./kb/store";
 import { readLineOrigins } from "./line-origin";
+import { cleanHeading } from "./settings";
 import type { Store } from "./store/types";
 import type { GeneratedResume, LineOrigin, OriginStrength } from "./types";
 
@@ -17,6 +18,8 @@ export interface LineOriginView {
   lines: LineOrigin[];
   /** "Company · Title" of each role, by its index in the résumé. */
   roles: string[];
+  /** The summary's heading on this résumé, when the user renamed it. */
+  summaryHeading?: string;
 }
 
 /**
@@ -36,7 +39,8 @@ export async function loadLineOriginView(store: Store, gen: GeneratedResume | nu
     }
     const [experiences, education] = saved ? [[], []] : await Promise.all([loadExperiences(store), loadEducation(store).catch(() => [] as string[])]);
     const { lines } = readLineOrigins(gen, experiences, { candidateName, education });
-    return lines.length ? { saved, lines, roles: gen.resume.experience.map((e) => `${e.company} · ${e.title}`) } : null;
+    const summaryHeading = cleanHeading(gen.resume.headings?.summary);
+    return lines.length ? { saved, lines, roles: gen.resume.experience.map((e) => `${e.company} · ${e.title}`), ...(summaryHeading ? { summaryHeading } : {}) } : null;
   } catch {
     return null;
   }
@@ -86,7 +90,7 @@ export function originCounts(lines: LineOrigin[]): Record<OriginStrength, number
 /** The lines in the view's order: the executive summary, then each role of the résumé; a group with no line is left out. */
 export function originGroups(view: LineOriginView): { label: string; lines: LineOrigin[] }[] {
   return [
-    { label: "Executive summary", lines: view.lines.filter((l) => l.kind === "summary") },
+    { label: view.summaryHeading ?? "Executive summary", lines: view.lines.filter((l) => l.kind === "summary") },
     ...view.roles.map((label, role) => ({ label, lines: view.lines.filter((l) => l.kind !== "summary" && l.role === role) })),
   ].filter((g) => g.lines.length);
 }

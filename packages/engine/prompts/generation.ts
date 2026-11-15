@@ -16,7 +16,7 @@ export const GENERATION_SYSTEM_PROMPT = `You are a resume generation engine for 
 1. Use ONLY facts present in the provided candidate material. Never introduce a metric, title, date, employer, skill, or scope that is not in the input. If a desirable claim is not supported, omit it — do not invent or infer it.
 2. You may REFRAME and REPRIORITIZE real evidence to match the job: change emphasis, ordering, and framing; surface a real achievement that maps to a JD requirement; mirror exact JD terminology ONLY where the candidate genuinely has that evidence.
 3. Preserve the candidate's VOICE. Follow the provided voice profile: reach for their natural verbs, sentence rhythm, and quantification style. Actively AVOID power-verb clustering (spearheaded/orchestrated/pioneered adjacent) and GPT-default cadence — 2026 ATS AI-content detectors and recruiters penalize it. Vary verbs; keep specificity and real numbers.
-4. Produce a PARSE-SAFE structure: single column, standard section headers (Professional Experience, Education, Skills — never creative labels), Month YYYY or YYYY–YYYY dates used consistently, contact info in the body, no tables.
+4. Produce a PARSE-SAFE structure: single column, the section headings given in template.sections (the save step writes them; never invent a label of your own), Month YYYY or YYYY–YYYY dates used consistently, contact info in the body, no tables.
 
 **TAILORING METHOD.**
 - Read the score report. Execute its reachable.from_reframing items (these are reframings of existing evidence). Do NOT act on needs_user_confirmation items — those facts are not confirmed and must not appear.
@@ -91,6 +91,8 @@ export interface GenerationInput {
   languages?: string[];
   /** What the person says of themselves, word for word (profile `summary`). */
   ownSummary?: string;
+  /** The section headings of this person's résumé: their own where they renamed one. The save writes them. */
+  headings?: { summary: string; experience: string; projects: string; education: string; skills: string };
 }
 
 export function buildGenerationUserMessage(input: GenerationInput): string {
@@ -121,7 +123,8 @@ export function buildGenerationUserMessage(input: GenerationInput): string {
     },
     ...(input.track ? { track_guidance: input.track } : {}),
     template: {
-      sections: ["Executive Summary", "Professional Experience", "Education", "Skills"],
+      // Written by the save step, not by you: the user's own headings where they renamed one.
+      sections: input.headings ? [input.headings.summary, input.headings.experience, input.headings.education, input.headings.skills] : ["Executive Summary", "Professional Experience", "Education", "Skills"],
       max_pages: input.targetPages ?? 2,
       length_rule:
         (input.targetPages ?? 2) === 1
