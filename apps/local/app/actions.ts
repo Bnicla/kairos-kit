@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getStore } from "@/store";
 import { removeIndexEntry, updateMeta, type ApplicationStatus, type ApplicationMeta } from "@kairos/engine/applications";
+import { MESSAGE_STATES, setReferralMessageState, type MessageState } from "@kairos/engine/referral-messages";
 
 /** Change an application's status (the pipeline action). */
 export async function setStatusAction(formData: FormData) {
@@ -14,6 +15,16 @@ export async function setStatusAction(formData: FormData) {
   await updateMeta(getStore(), id, { status }, note ? { statusNote: note } : undefined);
   revalidatePath(`/applications/${id}`);
   revalidatePath("/");
+}
+
+/** The user says what happened to a message they sent themselves: sent, answered, or back to a draft. */
+export async function setReferralMessageStateAction(formData: FormData) {
+  const appId = String(formData.get("appId") ?? "");
+  const contact = String(formData.get("contact") ?? "");
+  const state = String(formData.get("state") ?? "") as MessageState;
+  if (!appId || !contact || !MESSAGE_STATES.includes(state)) return;
+  await setReferralMessageState(getStore(), appId, contact, state);
+  revalidatePath(`/applications/${appId}`);
 }
 
 /** Archive (or restore) an application: hidden from the default board view. */

@@ -1,4 +1,5 @@
 import type { Experience } from "@kairos/engine/kb/types";
+import { worded } from "@kairos/engine/wording";
 import { serializeExperience, stripUnverified, untaggedFacts } from "@kairos/engine/kb/experience";
 import { claimNumbers, NUMBER_WORDS, proseOrganisations } from "@kairos/engine/tools/checks";
 import type { GeneratedResume } from "@kairos/engine/types";
@@ -20,34 +21,43 @@ import type { GeneratedResume } from "@kairos/engine/types";
  *    KB fact, which then supports the wording on the next run.
  *
  *  - drift (2026-11-12, also a "stretch" finding): the bullet restates a
- *    verified sentence whose own wording is weaker in kind. The record says the
+ *    verified sentence whose own wording is weaker in kind. The knowledge base says the
  *    candidate took part ("member of the team that", "supported the launch")
- *    and the bullet leads or does the thing itself; the record says it was
+ *    and the bullet leads or does the thing itself; the knowledge base says it was
  *    assessed ("evaluated", "recommended") and the bullet says it was put in
- *    place; the record says it was a pilot and the bullet says it was rolled
+ *    place; the knowledge base says it was a pilot and the bullet says it was rolled
  *    out. Found by the provenance comparison, where these three passed.
  *
+ *    Extended on 2026-11-15 (the outside audit's verb swaps, tests/stretch.test.ts): after a
+ *    fact that says the candidate took part, any verb of doing drifts ("contributed to the
+ *    guide" becoming "created the guide"), unless it is the candidate's own action, which the
+ *    fact states after "by"; "one of three engineers who wrote" is taking part; a bullet that
+ *    opens on the role ("Owner of …") leads; and a fact that says the work was shared ("worked
+ *    with", "co-led") drifts when the bullet leads it, or does alone what was done jointly.
+ *    Not covered: shared work written as a plain delivery verb ("worked with the data team on
+ *    the model" becoming "built the model"), and any swap the fact's opening words do not show.
+ *
  *  - number (2026-11-13, a "stretch" finding): a number the employer's facts do
- *    state, attached to another result. The record says "cut onboarding time
+ *    state, attached to another result. The knowledge base says "cut onboarding time
  *    by 40%" and the bullet says "raised revenue by 40%": grounding finds the
  *    40% and passes. The clause that carries the number is compared with the
  *    verified lines of that employer that state the same number; when it
  *    shares no content word with any of them, the number is listed.
  *  - organisation (2026-11-13, a "stretch" finding): "At <Name>, …" opening a
- *    sentence, where the record names <Name> in a fact (a client, a partner)
- *    and not as an employer. A name the record never mentions blocks in
+ *    sentence, where the knowledge base names <Name> in a fact (a client, a partner)
+ *    and not as an employer. A name the knowledge base never mentions blocks in
  *    grounding.
  *
  * The executive summary (2026-11-13) is read sentence by sentence with the
  * same rules. A summary sentence has no single employer: support is any
- * verified sentence of the record, or, when the sentence names an employer of
- * the record (its company name as the record writes it), a verified sentence
- * of that employer. A number of years, or a count, that no line of the record
+ * verified sentence of the knowledge base, or, when the sentence names an employer of
+ * the knowledge base (its company name as the knowledge base writes it), a verified sentence
+ * of that employer. A number of years, or a count, that no line of the knowledge base
  * states is a total composed across roles and is listed (rule "total"): the
- * record cannot prove it from one line, and it does not block. A number of
- * years is not listed when the dates of the record give it: the length of one
- * entry, of one employer or of the whole record, rounded down or to the
- * nearest year ("10+ years": at most the whole record).
+ * knowledge base cannot prove it from one line, and it does not block. A number of
+ * years is not listed when the dates of the knowledge base give it: the length of one
+ * entry, of one employer or of the whole knowledge base, rounded down or to the
+ * nearest year ("10+ years": at most the whole knowledge base).
  *
  * Deterministic and conservative: a sentence supports a claim when it holds a
  * verb of a supporting class (or the absolute word, or a synonym) and shares
@@ -242,17 +252,34 @@ export function deniedPhrases(exps: Experience[]): string[] {
   return [...out];
 }
 
-// --- Drift: the record's wording is weaker in kind ---------------------------
+// --- Drift: the knowledge base's wording is weaker in kind ---------------------------
 
 /** How a verified sentence opens when the candidate took part rather than led. */
 const PARTICIPATION_OPENERS = [
   ["member", "of"], ["part", "of"], ["supported"], ["support"], ["supports"], ["supporting"], ["assisted"], ["assist"],
   ["helped"], ["help"], ["contributed"], ["contribute"], ["participated"], ["took", "part"], ["take", "part"],
   ["shadowed"], ["sat", "on"], ["served", "on"],
+  // One of several: "one of three engineers who wrote", "one of a team of five that ran", "among the engineers who".
+  ["one", "of"], ["among"],
 ];
 /** Words that keep the participation visible on the résumé. */
+/**
+ * "support", "help" and "assist" count when they are the candidate's verb ("supported", "helping") or name what
+ * the candidate gave ("support for the launch", "help with"). As a plain noun they name a thing ("the support
+ * platform", "customer support team", "help desk") and keep nothing in view (2026-11-15).
+ */
 const PARTICIPATION_KEPT =
-  /\b(?:member|support\w*|assist\w*|help\w*|contribut\w*|participat\w*|part of|took part|take part|alongside|jointly|collaborat\w*|worked with|working with|sat on|served on|shadow\w*|team that|co led|co authored|co wrote|co built|co designed|co developed)\b/;
+  /\b(?:member|support(?:ed|ing)|support(?= (?:to|for|of|on|in|with)\b)|assist(?:ed|ing|ance)|help(?:ed|ing)|help(?= (?:to|for|with|on)\b)|contribut\w*|participat\w*|part of|took part|take part|alongside|jointly|collaborat\w*|worked with|working with|sat on|served on|shadow\w*|team that|one of|among|co \w+)\b/;
+/**
+ * How a verified sentence opens when the work was shared (2026-11-15): the candidate worked with others, or led
+ * or made the thing jointly ("co-led", "co-wrote"). The bullet drifts when it leads the thing alone, or does
+ * alone what was done jointly, and no word of it keeps the others in view.
+ */
+const SHARED_OPENERS = [["worked", "with"], ["working", "with"], ["collaborated"], ["partnered"], ["jointly"], ["alongside"], ["teamed"], ["co"]];
+/** Words that keep the others in view on the résumé, beyond the participation words. */
+const SHARED_KEPT = /\b(?:with|together|joint\w*|shared|team)\b/;
+/** A bullet that opens on the role itself ("Owner of the migration", "Lead on the rollout", "Responsible for …") claims the lead as a lead verb does. */
+const LEAD_NOUNS = new Set(["owner", "lead", "leader", "head", "responsible", "accountable"]);
 const LEAD_VERBS = new Set([
   "led", "leads", "headed", "directed", "managed", "manages", "owned", "owns", "drove", "drives", "ran", "runs",
   "spearheaded", "oversaw", "oversees", "architected", "orchestrated", "championed",
@@ -287,6 +314,21 @@ const startsWithAny = (s: string[], openers: string[][]) => {
 /** Same word family by a shared opening of four letters ("moved" / "move", "launched" / "launch", "rolled" / "rollout"). */
 const sameFamily = (a: string, b: string) => a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4);
 
+/** Past forms whose other forms do not share their opening letters. */
+const BASE_OF: Record<string, string> = {
+  wrote: "write", written: "write", built: "build", ran: "run", led: "lead", took: "take", taken: "take", made: "make", drove: "drive", driven: "drive",
+  grew: "grow", grown: "grow", held: "hold", taught: "teach", brought: "bring", sold: "sell", kept: "keep", began: "begin", begun: "begin",
+  chose: "choose", chosen: "choose", spoke: "speak", spoken: "speak", gave: "give", given: "give", sent: "send", spent: "spend", met: "meet",
+  found: "find", did: "do", done: "do", won: "win", rebuilt: "rebuild", rewrote: "rewrite", oversaw: "oversee",
+};
+/** One form for the forms of a verb: "wrote", "writing", "writes" and "write" are the same action. */
+const baseForm = (w: string) =>
+  (BASE_OF[w] ?? w)
+    .replace(/(?:ing|ed|es|s)$/, "")
+    .replace(/([b-df-hj-np-tv-z])\1$/, "$1")
+    .replace(/e$/, "");
+const sameAction = (a: string, b: string) => sameFamily(a, b) || baseForm(a) === baseForm(b);
+
 interface Drift {
   trigger: string;
   detail: string;
@@ -300,7 +342,9 @@ interface Drift {
  * verified sentence supports the stronger verb with the same objects.
  */
 function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], verbOnly = false): Drift | null {
-  const verb = ts[0] === "i" ? ts[1] : ts[0];
+  // "Sole owner of …", "Single-handedly ran …": the word of degree is the absolutes' to judge; the claim is the word after it.
+  const from = ts[0] === "i" ? 1 : 0;
+  const verb = ts[from] === "sole" || ts[from] === "solely" ? ts[from + 1] : ts[from];
   if (!verb) return null;
   // A summary clause often opens on a noun ("Card authorization for …"): only a verb can drift.
   if (verbOnly && !isVerb(verb)) return null;
@@ -326,22 +370,40 @@ function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], ve
     const by = s.indexOf("by");
     const scope = by > 0 ? s.slice(0, by) : s;
     const takesTeamsVerb = scope.slice(1).some((w) => !STOPWORDS.has(w) && sameFamily(w, verb));
-    if ((LEAD_VERBS.has(verb) || takesTeamsVerb) && !supported(sentences.filter((x) => !startsWithAny(x, PARTICIPATION_OPENERS)), LEAD_VERBS, words.slice(0, 4))) {
-      return { trigger: verb, detail: `the record says "${quote(s)}": the candidate took part, the bullet says "${verb}"` };
+    // Any other verb of doing ("contributed to the guide" becoming "created the guide", 2026-11-15) claims the thing
+    // itself, unless it is the candidate's own action, which the sentence states after "by".
+    const ownAction = by > 0 && matches.every((m) => m.indexOf("by") > 0 && m.slice(m.indexOf("by") + 1).some((w) => sameAction(w, verb)));
+    const doesIt = isVerb(verb) && !ownAction;
+    const leads = LEAD_VERBS.has(verb) || (!verbOnly && LEAD_NOUNS.has(verb));
+    const others = sentences.filter((x) => !startsWithAny(x, PARTICIPATION_OPENERS));
+    if ((leads || takesTeamsVerb || doesIt) && !supported(others, LEAD_VERBS, words.slice(0, 4)) && !supported(others, [verb], words.slice(0, 4))) {
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": the candidate took part, the bullet says "${verb}"` };
+    }
+  }
+  // Shared, now alone: led jointly or worked with others, and the bullet leads it, or does alone what was done jointly.
+  if (!PARTICIPATION_KEPT.test(bulletNorm) && !SHARED_KEPT.test(bulletNorm) && matches.every((s) => startsWithAny(s, SHARED_OPENERS))) {
+    const s = matches[0]!;
+    const t = s[0] === "i" ? s.slice(1) : s;
+    // "co-led" reads as the two words "co led": the verb that was shared is the second.
+    const jointVerb = t[0] === "co" ? t[1] : undefined;
+    const alone = LEAD_VERBS.has(verb) || (!verbOnly && LEAD_NOUNS.has(verb)) || (jointVerb !== undefined && sameAction(verb, jointVerb));
+    const others = sentences.filter((x) => !startsWithAny(x, SHARED_OPENERS) && !startsWithAny(x, PARTICIPATION_OPENERS));
+    if (alone && !supported(others, LEAD_VERBS, words.slice(0, 4)) && !supported(others, [verb], words.slice(0, 4))) {
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": the work was shared, the bullet says "${verb}" alone` };
     }
   }
   // Assessed, now in place.
   if (IMPLEMENT_VERBS.has(verb) && !ASSESSMENT_KEPT.test(bulletNorm) && matches.every((s) => ASSESSMENT_OPENERS.includes(s[0] === "i" ? s[1]! : s[0]!))) {
     const s = matches[0]!;
     if (!s.some((w) => IMPLEMENT_VERBS.has(w)) && !supported(sentences.filter((x) => !matches.includes(x)), IMPLEMENT_VERBS, words.slice(0, 4))) {
-      return { trigger: verb, detail: `the record says "${quote(s)}": it was assessed, the bullet says "${verb}"` };
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": it was assessed, the bullet says "${verb}"` };
     }
   }
   // A pilot, now a rollout.
   if (ROLLOUT_VERBS.has(verb) && !PILOT_KEPT.test(bulletNorm) && matches.every((s) => s.some((w) => PILOT_WORDS.has(w)))) {
     const s = matches[0]!;
     if (!s.some((w) => ROLLOUT_VERBS.has(w)) && !supported(sentences.filter((x) => !matches.includes(x)), ROLLOUT_VERBS, words.slice(0, 4))) {
-      return { trigger: verb, detail: `the record says "${quote(s)}": it was a pilot, the bullet says "${verb}"` };
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": it was a pilot, the bullet says "${verb}"` };
     }
   }
   return null;
@@ -410,7 +472,7 @@ export function numberSupport(text: string, lines: string[]): NumberSupport[] {
   });
 }
 
-/** A date of the record ("2021-08", "2021", a parsed date, "present") as a count of months; null when unreadable. */
+/** A date of the knowledge base ("2021-08", "2021", a parsed date, "present") as a count of months; null when unreadable. */
 function monthOf(v: unknown, month: number, now: Date): number | null {
   const text = v instanceof Date ? v.toISOString().slice(0, 7) : String(v ?? "").trim();
   if (/^(?:present|current|now|ongoing|today)$/i.test(text)) return now.getFullYear() * 12 + now.getMonth() + 1;
@@ -419,8 +481,8 @@ function monthOf(v: unknown, month: number, now: Date): number | null {
 }
 
 /**
- * The lengths, in years, that the dates of the record give: each entry, each
- * employer (first start to last end) and the whole record. A date with no
+ * The lengths, in years, that the dates of the knowledge base give: each entry, each
+ * employer (first start to last end) and the whole knowledge base. A date with no
  * month counts from January (a start) or to December (an end).
  */
 function recordSpans(byCompany: Map<string, Experience[]>, now = new Date()): number[] {
@@ -492,12 +554,70 @@ const NUMBER_MIN_SHARED = 1;
 
 export const SUMMARY = "Executive summary";
 
-/** The executive summary as the sentences the checks read, in order (a line break also ends a sentence). */
+/** Titles before a name, written with a capital: a full stop after one never ends a sentence. In small letters "ms" and "mt" are units, and end one. */
+const TITLE = new Set(["dr", "mr", "mrs", "ms", "prof", "st", "mt"]);
+/** Abbreviations that are always followed by what they belong to: a full stop after one never ends a sentence. */
+const ABBREVIATION_NEVER_ENDS = new Set(["vs", "no", "approx", "est", "dept", "univ", "e.g", "i.e"]);
+/** Abbreviations that close a name: a full stop after one may or may not end the sentence. */
+const ABBREVIATION_MAY_END = new Set(["inc", "ltd", "corp", "co", "llc", "jr", "sr"]);
+/** A word that starts a sentence in a résumé: a past or -ing verb form, a common irregular past, or a function word. */
+const SENTENCE_START =
+  /^(?:[A-Z][a-z]*(?:ed|ing)|Built|Ran|Won|Wrote|Grew|Drove|Made|Took|Held|Kept|Sold|Taught|Brought|Cut|Set|Spent|Rebuilt|Oversaw|Began|Chose|Gave|Got|Rose|Saw|Sent|Spoke|Stood|Went|Did|Has|Have|Had|Is|Are|Was|Were|The|A|An|I|He|She|They|We|It|This|That|These|Those|Now|Currently|Also|Seeking|Looking|Known|My|Our|His|Her|Their|As|In|At|With|For|On|After|Before|During|Since|While|When)\b/;
+
+/**
+ * Whether the full stop that closes `before` (the text up to and including it) ends a sentence, `next`
+ * being the text after the white space that follows. The rule looks at the whole token the full stop
+ * closes (from the last white space, without an opening bracket, quote or bold mark):
+ *  - a full stop inside a number ("3.6", "$1.5M") is never followed by white space, so it is never asked about;
+ *  - a token that holds anything but letters and inner full stops is not an abbreviation and ends the
+ *    sentence: a digit ("€15M.", "$2B.", "50k.", "Q3.", "2024.", "1st."), a sign ("40%.", "AT&T.", "R&D.");
+ *  - after a title written with a capital (Dr., Ms., Prof., St.) or a linking abbreviation (vs., No.,
+ *    e.g., i.e.) the sentence goes on;
+ *  - after a capital letter that is a word by itself (an initial, "J."), a dotted abbreviation ("B.S.",
+ *    "Ph.D.", "U.S.": pieces of at most four letters, one of them a single letter, so "Node.js." is not
+ *    one) or the abbreviation that closes a name ("Inc.", "Ltd.", "Jr."), the sentence goes on unless
+ *    the next word reads as the start of one ("Led", "Built", "The", "Currently");
+ *  - after anything else it ends, as before.
+ * "?" and "!" always end a sentence.
+ */
+function endsSentence(before: string, next: string): boolean {
+  if (!before.endsWith(".")) return true;
+  const token = (/(\S+)\.$/.exec(before)?.[1] ?? "").replace(/^[(["“'*_]+/, "");
+  if (!/^[A-Za-z]+(?:\.[A-Za-z]+)*$/.test(token)) return true; // a number, an amount, a bracket, a quote: not an abbreviation
+  const word = token.toLowerCase();
+  if (ABBREVIATION_NEVER_ENDS.has(word) || (TITLE.has(word) && /^[A-Z]/.test(token))) return false;
+  const pieces = token.split(".");
+  const initial = /^[A-Z]$/.test(token);
+  const dotted = pieces.length > 1 && pieces.every((x) => x.length <= 4) && pieces.some((x) => x.length === 1);
+  if (!initial && !dotted && !ABBREVIATION_MAY_END.has(word)) return true;
+  return SENTENCE_START.test(next.replace(/^[*"“(]+/, ""));
+}
+
+/** A line of the summary without the mark of a list item ("- ", "* ", "• ", "1. "), so that a summary written as a list reads as its lines. */
+const withoutListMark = (line: string) => line.replace(/^\s*(?:[-*+•–]|\d{1,2}[.)])\s+(?=\S)/, "");
+
+/**
+ * The executive summary as the sentences the checks read, in order. A line break ends a sentence;
+ * so does a full stop, a "?" or a "!" followed by white space and a capital, a quote, a bracket or a
+ * bold mark, except after an abbreviation (endsSentence).
+ */
 export const summarySentences = (summary: string): string[] =>
   summary
     .split("\n")
     .filter((l) => l.trim())
-    .flatMap((line) => line.split(/(?<=[.!?])\s+(?=[A-Z*"“(])/).filter((x) => x.trim()));
+    .flatMap((raw) => {
+      const line = withoutListMark(raw);
+      const out: string[] = [];
+      let from = 0;
+      for (const m of line.matchAll(/(?<=[.!?])\s+(?=[A-Z*"“(])/g)) {
+        const at = m.index!;
+        if (!endsSentence(line.slice(from, at), line.slice(at + m[0].length))) continue;
+        out.push(line.slice(from, at));
+        from = at + m[0].length;
+      }
+      out.push(line.slice(from));
+      return out.filter((x) => x.trim());
+    });
 
 /**
  * `extraSupport` is the candidate's own curated writing (profile, base résumé):
@@ -540,7 +660,7 @@ export function checkResumeStretch(
       const drift = clauseDrift(ts, bulletNorm, sentences, summary);
       if (drift && !seen.has(`drift:${drift.trigger}`)) {
         seen.add(`drift:${drift.trigger}`);
-        seen.add(drift.trigger); // one finding per verb: the drift names the record's own sentence
+        seen.add(drift.trigger); // one finding per verb: the drift names the knowledge base's own sentence
         flag("drift", drift.trigger, drift.detail);
       }
       ts.forEach((w, i) => {
@@ -582,21 +702,21 @@ export function checkResumeStretch(
     for (const n of numberSupport(bullet, lines)) {
       if (n.stated && n.words >= 2 && n.shared < NUMBER_MIN_SHARED && !seen.has(`n:${n.raw}`)) {
         seen.add(`n:${n.raw}`);
-        flag("number", n.raw, `number attached to another result: the record states "${n.raw.split(" ")[0]}" in "${clip(n.line)}", and the résumé gives it to something else`);
+        flag("number", n.raw, `number attached to another result: the knowledge base states "${n.raw.split(" ")[0]}" in "${clip(n.line)}", and the résumé gives it to something else`);
       }
     }
 
-    // "At <Name>, …": a client or a partner of the record given as the place of work.
+    // "At <Name>, …": a client or a partner of the knowledge base given as the place of work.
     for (const org of proseOrganisations(bullet, companyNames, recordedText, extraSupport)) {
       if (org.opening && org.status === "recorded" && !seen.has(`org:${org.name}`)) {
         seen.add(`org:${org.name}`);
-        flag("organisation", org.name, `"At ${org.name}" gives it as a place of work: the record names ${org.name} in a fact, not as an employer`);
+        flag("organisation", org.name, `"At ${org.name}" gives it as a place of work: the knowledge base names ${org.name} in a fact, not as an employer`);
       }
     }
   };
 
   // The summary, sentence by sentence. It has no single employer: support is
-  // the whole verified record, or the employers the sentence names.
+  // the whole verified knowledge base, or the employers the sentence names.
   const all = [...byCompany.values()].flat();
   const allSentences = [...supportSentences(all, guard), ...extraSentences];
   const allLines = [...verifiedLines(all), ...extraLines];
@@ -613,7 +733,7 @@ export function checkResumeStretch(
         company: SUMMARY,
         bullet: line,
         trigger: hit,
-        detail: `the knowledge base says never to claim "${hit}"`,
+        detail: worded`the knowledge base says never to claim "${hit}"`,
       });
       continue;
     }
@@ -626,21 +746,21 @@ export function checkResumeStretch(
       const flag = (rule: StretchFinding["rule"], trigger: string, detail: string) =>
         findings.push({ kind: "stretch", rule, company: SUMMARY, bullet: sentence, trigger, detail });
       // Totals. A number of years that no line states and the dates of the
-      // record do not give (one role, one employer, the whole record; a
-      // lower bound such as "10+ years" within the whole record), then a
+      // knowledge base do not give (one role, one employer, the whole knowledge base; a
+      // lower bound such as "10+ years" within the whole knowledge base), then a
       // count that no line states.
       for (const y of yearsStated(sentence)) {
         const n = Number(y.value);
         if (allLines.some((l) => yearsStated(l).some((s) => s.value === y.value))) continue;
         if (y.atLeast ? n <= Math.floor(Math.max(0, ...spans)) : spans.some((span) => n === Math.floor(span) || n === Math.round(span))) continue;
-        flag("total", y.raw, `no line of the record states "${y.raw}", and its dates do not give it${first ? ` (the roles run from ${first} to ${last})` : ""}. A total composed across roles is the candidate's to confirm`);
+        flag("total", y.raw, `no line of the knowledge base states "${y.raw}", and its dates do not give it${first ? ` (the roles run from ${first} to ${last})` : ""}. A total composed across roles is the candidate's to confirm`);
       }
       for (const n of numberSupport(sentence, lines)) {
         if (n.stated) continue;
         if (scope.length && numberSupport(sentence, allLines).some((m) => m.raw === n.raw && m.stated)) {
-          flag("number", n.raw, `the record states "${n.raw.split(" ")[0]}" under another employer, not under ${named.map((exps) => exps[0]!.frontmatter.company.trim()).join(" or ")}`);
+          flag("number", n.raw, `the knowledge base states "${n.raw.split(" ")[0]}" under another employer, not under ${named.map((exps) => exps[0]!.frontmatter.company.trim()).join(" or ")}`);
         } else if (n.count) {
-          flag("total", n.raw, `no line of the record states "${n.raw}". A total composed across roles is the candidate's to confirm`);
+          flag("total", n.raw, `no line of the knowledge base states "${n.raw}". A total composed across roles is the candidate's to confirm`);
         }
       }
     }
@@ -654,7 +774,7 @@ export function checkResumeStretch(
     for (const bullet of [exp.summary ?? "", ...exp.bullets].filter(Boolean)) {
       const hit = denied.find((p) => containsPhrase(tokens(bullet), p));
       if (hit) {
-        findings.push({ kind: "denied", rule: "denied", company: exp.company, bullet, trigger: hit, detail: `the knowledge base says never to claim "${hit}"` });
+        findings.push({ kind: "denied", rule: "denied", company: exp.company, bullet, trigger: hit, detail: worded`the knowledge base says never to claim "${hit}"` });
         continue;
       }
       checkUnit(exp.company, bullet, sentences, lines, exp.company);

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,7 +12,7 @@ import { createApplication } from "@kairos/engine/applications";
 /**
  * The real MCP server over stdio against a temporary data folder (invented
  * demo data): untagged facts are reported on save, a cover letter's numbers
- * are checked against the record and the metrics register, and documents are
+ * are checked against the knowledge base and the metrics register, and documents are
  * rendered on the paper the settings give.
  */
 describe("Kairos MCP server: record, register and paper", () => {
@@ -105,7 +105,7 @@ describe("Kairos MCP server: record, register and paper", () => {
   it("save_cover_letter refuses a number from an untagged line and a number the register withholds", async () => {
     const untagged = await client.callTool({ name: "save_cover_letter", arguments: { appId, markdown: letter("At Ledgerly I rewrote the nightly export, which now runs in 12% of the time.") } });
     expect(untagged.isError).toBe(true);
-    expect(text(untagged)).toMatch(/not in the user's verified record, profile, education or the posting: 12%/);
+    expect(text(untagged)).toMatch(/not in the user's verified knowledge base, profile, education or the posting: 12%/);
 
     const retired = await client.callTool({ name: "save_cover_letter", arguments: { appId, markdown: letter("At Ledgerly I cut checkout errors by 60%.") } });
     expect(retired.isError).toBe(true);
@@ -146,5 +146,59 @@ describe("Kairos MCP server: record, register and paper", () => {
     const rendered = await client.callTool({ name: "render_docx", arguments: { appId } });
     expect(JSON.parse(text(rendered)).paper).toBe("a4");
     expect(await pageSize("resume.docx")).toMatch(/w:w="11906"[^>]*w:h="16838"/);
+    // The local server names a document by its full path on this disk, not by its path inside the knowledge base.
+    expect(JSON.parse(text(rendered)).docxPath).toBe(join(home, "applications", appId, "resume.docx"));
   }, 180_000);
+
+  it("the local server knows its data folder: setup_status names it, and what /apply attaches is a full path", async () => {
+    const status = JSON.parse(text(await client.callTool({ name: "setup_status", arguments: {} })));
+    expect(status.data_folder.home).toBe(home);
+    const form = JSON.parse(text(await client.callTool({ name: "get_form_profile", arguments: { appId } })));
+    const attached = JSON.stringify(form);
+    expect(attached).toContain(join(home, "applications", appId));
+  }, 60_000);
+});
+
+describe("Kairos MCP server: the data folder on a first run", () => {
+  const parent = mkdtempSync(join(tmpdir(), "kairos-first-run-"));
+  const home = join(parent, "Kairos");
+  let client: Client;
+  const text = (r: unknown) => ((r as { content: { text: string }[] }).content[0]?.text ?? "");
+
+  beforeAll(async () => {
+    client = new Client({ name: "test", version: "0" }, { capabilities: { elicitation: {} } });
+    await client.connect(
+      new StdioClientTransport({
+        command: "npx",
+        args: ["tsx", "apps/local/mcp/server.ts"],
+        env: { ...process.env, KAIROS_HOME: home } as Record<string, string>,
+        stderr: "ignore",
+      }),
+    );
+  }, 60_000);
+  afterAll(async () => {
+    await client?.close();
+    rmSync(parent, { recursive: true, force: true });
+  });
+
+  it("setup_status reads only, also when asked the former way; create_data_folder creates the folder that KAIROS_HOME names and reports it", async () => {
+    expect(existsSync(home)).toBe(false);
+    // The former call: it still answers, creates nothing, and says which tool does.
+    const status = JSON.parse(text(await client.callTool({ name: "setup_status", arguments: { init: true } })));
+    expect(status.data_folder.home).toBe(home);
+    expect(status.data_folder.exists).toBe(false);
+    expect(status.data_folder.init_ignored).toMatch(/create_data_folder/);
+    expect(existsSync(home)).toBe(false);
+
+    const made = JSON.parse(text(await client.callTool({ name: "create_data_folder", arguments: {} })));
+    expect(made.home).toBe(home);
+    expect(made.existed).toBe(false);
+    expect(made.created.length).toBeGreaterThan(0);
+    expect(existsSync(join(home, "knowledge-base"))).toBe(true);
+    expect(existsSync(join(home, "applications"))).toBe(true);
+    // Again: nothing more to create, and the status now finds the folder.
+    const again = JSON.parse(text(await client.callTool({ name: "create_data_folder", arguments: {} })));
+    expect(again).toMatchObject({ existed: true, created: [] });
+    expect(JSON.parse(text(await client.callTool({ name: "setup_status", arguments: {} }))).data_folder).toEqual({ home, exists: true });
+  }, 60_000);
 });

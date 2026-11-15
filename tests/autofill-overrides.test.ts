@@ -8,7 +8,7 @@ const rows: WorkHistoryRow[] = [
 ];
 
 describe("applyWorkHistoryOverrides (how record roles appear on forms)", () => {
-  it("returns the record unchanged when there are no overrides", () => {
+  it("returns the knowledge base unchanged when there are no overrides", () => {
     expect(applyWorkHistoryOverrides(rows, undefined)).toEqual(rows);
     expect(applyWorkHistoryOverrides(rows, {})).toEqual(rows);
   });
@@ -28,12 +28,12 @@ describe("applyWorkHistoryOverrides (how record roles appear on forms)", () => {
     expect(out.map((r) => r.id)).toEqual(["acme-lead", "globex-pm"]);
   });
 
-  it("never adds a role the record does not hold", () => {
+  it("never adds a role the knowledge base does not hold", () => {
     const out = applyWorkHistoryOverrides(rows, { "made-up-employer": { title: "Director" } });
     expect(out).toEqual(rows);
   });
 
-  it("ignores blank strings instead of erasing the record's value", () => {
+  it("ignores blank strings instead of erasing the knowledge base's value", () => {
     const out = applyWorkHistoryOverrides(rows, { "acme-lead": { title: "  ", end: "" } });
     expect(out[0]).toEqual(rows[0]);
   });

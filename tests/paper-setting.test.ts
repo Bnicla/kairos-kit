@@ -109,8 +109,10 @@ describe("saveGeneratedResume renders on the user's paper", () => {
 describe("every local render path reads the paper setting", () => {
   it("render_docx, both cover-letter paths and tailor-resume pass or report it", () => {
     const server = readFileSync("apps/local/mcp/server.ts", "utf8");
-    expect(server).toMatch(/markdownResumeToDocx\(md, \{ headline, template: \{ paper \} \}\)/);
-    expect(server).toMatch(/markdownLetterToDocx\(markdown, \{ template: \{ paper: await loadResumePaper\(store\) \} \}\)/);
+    // Both go through docxDesign, which gives the paper of the setting unless a hosted server supplied the user's own design values (none locally).
+    expect(server).toMatch(/markdownResumeToDocx\(md, \{ headline, template \}\)/);
+    expect(server).toMatch(/markdownLetterToDocx\(markdown, \{ template: await docxDesign\(\) \}\)/);
+    expect(server).toMatch(/async function docxDesign\(\)[\s\S]{0,200}paper: own\.paper \?\? \(await loadResumePaper\(store\)\)/);
     expect(readFileSync("apps/local/lib/generate.ts", "utf8")).toMatch(/markdownLetterToDocx\(markdown, \{ template: \{ paper: await loadResumePaper\(store\) \} \}\)/);
     // The headless résumé and tailor-resume go through saveGeneratedResume, which resolves the paper itself.
     expect(readFileSync("apps/local/scripts/tailor-resume.mts", "utf8")).toMatch(/\{ stretch, paper, origins \} = await saveGeneratedResume\(/);

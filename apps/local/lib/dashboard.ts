@@ -1,6 +1,7 @@
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { renderSafeMarkdown } from "@/lib/safe-markdown";
 import { getStore, kairosHome } from "@/store";
+import type { Store } from "@/store";
 import { backlogBuckets, type BacklogEntry } from "@kairos/engine/sourcing/backlog";
 import {
   loadIndexHealed,
@@ -17,10 +18,20 @@ import {
 import { loadExperiences, loadVoiceProfile } from "@kairos/engine/kb/store";
 import { readApplicationForm, type ApplicationForm } from "@kairos/engine/forms";
 import { computeHealth, type HealthReport } from "@kairos/engine/health";
-import type { GeneratedResume, LineOrigin, RequirementCoverageRow, ScoreReport } from "@kairos/engine/types";
-import { readLineOrigins } from "@kairos/engine/line-origin";
+import type { GeneratedResume, RequirementCoverageRow, ScoreReport } from "@kairos/engine/types";
+import { loadLineOriginView, type LineOriginView } from "@kairos/engine/line-origin-view";
+import { recordDepth } from "@kairos/engine/record-view";
 import { buildDaily, buildFunnel, type DailyApplications, type Funnel } from "@kairos/engine/funnel";
-import { maxSourcedCards, readProfileSettings, storiesMapPath } from "@kairos/engine/settings";
+import { maxSourcedCards, readProfileSettings, referralRule, storiesMapPath } from "@kairos/engine/settings";
+import {
+  buildContactIndex,
+  contactsAtCompany,
+  loadContacts,
+  qualifiesForReferrals,
+  referralsForApplication,
+  type ApplicationReferrals,
+} from "@kairos/engine/contacts";
+import { loadReferralMessages, type ReferralMessage } from "@kairos/engine/referral-messages";
 import type { SearchProfile } from "@kairos/engine/sourcing/types";
 
 /**
@@ -29,7 +40,17 @@ import type { SearchProfile } from "@kairos/engine/sourcing/types";
  */
 
 /** Index entry + which documents exist (drives the Draft-card generate buttons). */
-export type BoardEntry = IndexEntry & { has_resume?: boolean };
+export type BoardEntry = IndexEntry & {
+  has_resume?: boolean;
+  /**
+   * People the user knows at the company (LinkedIn connections), set only on
+   * an application that passes the referral rule (by default: a good match
+   * with high confidence, not sent yet) and has at least one:
+   * `at` the company itself, `similar` at a company with a longer or shorter
+   * form of the name.
+   */
+  contacts?: { at: number; similar: number };
+};
 
 export interface DashboardData {
   applications: BoardEntry[];
@@ -103,8 +124,7 @@ export async function getMaxSourcedCards(): Promise<number> {
 }
 
 /** Latest sourcing run for the Sourced column; null before the first run. */
-export async function getSourcedRun(): Promise<SourcedRun | null> {
-  const store = getStore();
+export async function getSourcedRun(store: Store = getStore()): Promise<SourcedRun | null> {
   const run = await store.readJson<SourcedRun>(["sourcing", "last-run.json"]);
   if (!run) return null;
   // The Sourced column shows the persistent backlog (this run's cards plus
@@ -138,8 +158,7 @@ export async function getDeepScan(): Promise<SourcedRun | null> {
   };
 }
 
-export async function getDashboard(): Promise<DashboardData> {
-  const store = getStore();
+export async function getDashboard(store: Store = getStore()): Promise<DashboardData> {
   const [index, experiences, profileRaw, insightsMd] = await Promise.all([
     loadIndexHealed(store),
     loadExperiences(store),
@@ -147,14 +166,27 @@ export async function getDashboard(): Promise<DashboardData> {
     store.readFile(["insights.md"]),
   ]);
   const profile = profileRaw ? (matter(profileRaw).data as DashboardData["profile"]) : {};
+  // Possible referrals: one read of the contacts file for the whole board. A
+  // missing or unreadable file means no mark, never a broken board.
+  const contactsFile = await loadContacts(store).catch(() => null);
+  const contactIndex = contactsFile?.contacts.length ? buildContactIndex(contactsFile.contacts) : null;
+  const rule = referralRule(readProfileSettings(profileRaw));
+  const contactsFor = async (a: IndexEntry): Promise<BoardEntry["contacts"]> => {
+    if (!contactIndex || !a.score_band) return undefined;
+    // Index entries written before the confidence was copied there: read it from the application's own file.
+    const score_confidence = a.score_confidence ?? (await readMeta(store, a.id).catch(() => null))?.score_confidence;
+    if (!qualifiesForReferrals({ ...a, score_confidence }, rule)) return undefined;
+    const found = contactsAtCompany(contactIndex, a.company);
+    return found.exact.length + found.related.length > 0 ? { at: found.exact.length, similar: found.related.length } : undefined;
+  };
   // Board cards show generate buttons for missing documents; one listFiles per
   // open app (local fs, cheap). Closed/archived apps don't need the flags.
   const applications: BoardEntry[] = await Promise.all(
     index.applications.map(async (a) => {
       if (["rejected", "withdrawn", "expired"].includes(a.status) || a.archived) return a;
-      const files = await store.listFiles(["applications", a.id]).catch(() => []);
+      const [files, contacts] = await Promise.all([store.listFiles(["applications", a.id]).catch(() => []), contactsFor(a)]);
       const names = new Set(files.map((f) => f.name));
-      return { ...a, has_resume: names.has("resume.docx") };
+      return { ...a, has_resume: names.has("resume.docx"), ...(contacts ? { contacts } : {}) };
     }),
   );
   return {
@@ -195,22 +227,21 @@ export interface ApplicationDetail {
   requirementCoverage: RequirementCoverageRow[] | null;
   /** The verified fact each résumé line comes from (resume.json line_origins); null when there is no résumé. */
   lineOrigins: LineOriginView | null;
+  /** People the user knows at the company; null unless the application passes the referral rule and there is at least one. */
+  referrals: ApplicationReferrals | null;
+  /** Message drafts to contacts kept with the application (shown whatever the application's status). */
+  referralMessages: ReferralMessage[];
 }
 
-export interface LineOriginView {
-  /** False for a résumé saved before origins were recorded: they are computed on read, from the record as it is now. */
-  saved: boolean;
-  lines: LineOrigin[];
-  /** "Company · Title" of each role, by its index in the résumé. */
-  roles: string[];
-}
+// The view's data is the engine's, shared with the connector's application page.
+export type { LineOriginView };
 
 // Markdown files in an application folder that already have their own view.
 const NOT_PREP_NOTES = new Set(["resume-source.md", "cover-letter.md", "job-ad-snapshot.md"]);
 const NOTE_NAME = /^[\w.-]+\.md$/;
 const GLANCE_NAME = /^[\w.-]+\.html$/;
 
-async function listPrepNotes(store: ReturnType<typeof getStore>, id: string): Promise<string[]> {
+export async function listPrepNotes(store: Store, id: string): Promise<string[]> {
   const files = await store.listFiles(["applications", id]);
   return files
     .map((f) => f.name)
@@ -274,27 +305,18 @@ export async function getApplication(id: string): Promise<ApplicationDetail | nu
     },
     prepNotes,
     requirementCoverage: readRequirementCoverage(resumeJson),
-    lineOrigins: await readLineOriginView(store, resumeJson),
+    lineOrigins: await loadLineOriginView(store, resumeJson),
+    referrals: await readReferrals(store, meta),
+    // Advisory section only: an unreadable file shows nothing rather than an error.
+    referralMessages: await loadReferralMessages(store, id).catch(() => []),
   };
 }
 
-/**
- * The line origins of the saved résumé. An older resume.json has none: they
- * are computed here from the record. Advisory section only: any failure (a
- * hand-edited file, an unreadable record) shows nothing rather than an error.
- */
-async function readLineOriginView(store: ReturnType<typeof getStore>, gen: GeneratedResume | null): Promise<LineOriginView | null> {
-  if (!gen?.resume || !Array.isArray(gen.resume.experience)) return null;
+/** Advisory section only: any failure (an unreadable contacts file) shows nothing rather than an error. */
+async function readReferrals(store: ReturnType<typeof getStore>, meta: ApplicationMeta): Promise<ApplicationReferrals | null> {
   try {
-    const saved = Array.isArray(gen.line_origins);
-    let candidateName: string | undefined;
-    if (!saved) {
-      const profileRaw = await store.readFile(["profile.md"]);
-      const name = profileRaw ? (matter(profileRaw).data as { name?: unknown }).name : undefined;
-      if (typeof name === "string") candidateName = name;
-    }
-    const { lines } = readLineOrigins(gen, saved ? [] : await loadExperiences(store), { candidateName });
-    return lines.length ? { saved, lines, roles: gen.resume.experience.map((e) => `${e.company} · ${e.title}`) } : null;
+    const r = await referralsForApplication(store, meta);
+    return r.qualifies && r.contacts.length + r.related.length > 0 ? r : null;
   } catch {
     return null;
   }
@@ -346,9 +368,8 @@ export interface KnowledgeBase {
 
 /** How far beyond the résumé a role has been enriched — counts confirmed [C] facts. */
 function depthOf(body: string): { confirmedCount: number; depth: KBDepth } {
-  const confirmedCount = (body.match(/\[C\]/g) ?? []).length;
-  const depth: KBDepth = confirmedCount === 0 ? "résumé-only" : confirmedCount < 4 ? "developing" : "rich";
-  return { confirmedCount, depth };
+  // The rule is the engine's, shared with the connector's record page.
+  return recordDepth(body);
 }
 
 /** Render KB markdown, turning [R]/[C]/[F] provenance tags into colored markers. */
@@ -401,15 +422,13 @@ export interface StarStories {
 }
 
 /** STAR story repository: curated behavioral-interview stories grounded in the KB. */
-export async function getStarStories(): Promise<StarStories | null> {
-  const store = getStore();
+export async function getStarStories(store: Store = getStore()): Promise<StarStories | null> {
   const data = await store.readJson<StarStories>(["knowledge-base", "star-stories.json"]);
   if (!data || !Array.isArray(data.themes)) return null;
   return data;
 }
 
-export async function getHealth(): Promise<HealthReport> {
-  const store = getStore();
+export async function getHealth(store: Store = getStore()): Promise<HealthReport> {
   const [experiences, profileRaw] = await Promise.all([loadExperiences(store), store.readFile(["profile.md"])]);
   const profile = profileRaw ? (matter(profileRaw).data as Record<string, unknown>) : {};
   return computeHealth(experiences, {
@@ -499,8 +518,7 @@ export async function getMetricsGlance(): Promise<MetricsGlance | null> {
   return JSON.parse(raw) as MetricsGlance;
 }
 
-export async function getMetricsRegister(): Promise<MetricsRegisterData | null> {
-  const store = getStore();
+export async function getMetricsRegister(store: Store = getStore()): Promise<MetricsRegisterData | null> {
   const raw = await store.readFile(["knowledge-base", "metrics-register.md"]);
   if (!raw) return null;
   return parseMetricsRegister(raw);
@@ -519,11 +537,10 @@ export interface DeepDives {
 /** Deep dives: the war-story theme from the STAR repository plus the approved
  *  depth layers in the stories map (keyed to KB story titles). The map's path
  *  is profile.md `stories_map`, default knowledge-base/stories-map.json. */
-export async function getDeepDives(): Promise<DeepDives> {
-  const store = getStore();
+export async function getDeepDives(store: Store = getStore()): Promise<DeepDives> {
   const mapPath = storiesMapPath(readProfileSettings(await store.readFile(["profile.md"])));
   const [stars, map] = await Promise.all([
-    getStarStories(),
+    getStarStories(store),
     store.readJson<{ stories?: { kb_story?: string; title?: string; depth?: string[] }[] }>(mapPath),
   ]);
   const warTheme = stars?.themes.find((t) => t.theme.startsWith("War Stories")) ?? null;
@@ -534,15 +551,13 @@ export async function getDeepDives(): Promise<DeepDives> {
 }
 
 /** Application funnel for /funnel: recomputed from every application's meta on each load. */
-export async function getFunnel(): Promise<Funnel> {
-  const store = getStore();
+export async function getFunnel(store: Store = getStore()): Promise<Funnel> {
   const ids = await listApplicationFolders(store);
   const metas = (await Promise.all(ids.map((id) => readMeta(store, id)))).filter((m): m is ApplicationMeta => !!m);
   return buildFunnel(metas);
 }
 
-export async function getDailyApplications(): Promise<DailyApplications[]> {
-  const store = getStore();
+export async function getDailyApplications(store: Store = getStore()): Promise<DailyApplications[]> {
   const ids = await listApplicationFolders(store);
   const metas = (await Promise.all(ids.map((id) => readMeta(store, id)))).filter((m): m is ApplicationMeta => !!m);
   return buildDaily(metas);
@@ -559,8 +574,7 @@ export type { GapReport };
  * application page shows: last score version, else score-report.json),
  * aggregated by the engine. Archived applications are excluded there.
  */
-export async function getGapReport(days: number = DEFAULT_WINDOW_DAYS): Promise<GapReport> {
-  const store = getStore();
+export async function getGapReport(days: number = DEFAULT_WINDOW_DAYS, store: Store = getStore()): Promise<GapReport> {
   const ids = await listApplicationFolders(store);
   const inputs = await Promise.all(
     ids.map(async (id): Promise<GapInput | null> => {

@@ -81,16 +81,124 @@ export function decodeEntities(s: string): string {
   });
 }
 
+// ----------------------------------------------------------------------------
+// Limits. A fetched page is someone else's text, of any shape, and the guard
+// runs on the thread that serves every user of the hosted connector. So its
+// work has to grow in step with the page's size, and it stops when a page is
+// nested deeper than a browser allows or takes too long.
+// ----------------------------------------------------------------------------
+
+/** The page cannot be read within the guard's limits. The caller tells the user to paste the text. */
+export class PostingTooComplexError extends Error {
+  constructor(why: string) {
+    super(`The page ${why}. Paste the text instead.`);
+    this.name = "PostingTooComplexError";
+  }
+}
+
+/** Elements open inside one another. Browsers stop at 512 too. */
+export const MAX_HTML_DEPTH = 512;
+/** How long reading one page's markup may take. A posting's page takes a few milliseconds. */
+export const GUARD_BUDGET_MS = 1000;
+
+/** Called in the guard's loops: throws once the page has taken too long. Set for the length of one sanitizeHtml call. */
+let tick: () => void = () => undefined;
+function startBudget(ms: number): () => void {
+  const end = Date.now() + ms;
+  let n = 0;
+  return () => {
+    if ((++n & 255) === 0 && Date.now() > end) throw new PostingTooComplexError("took too long to read");
+  };
+}
+
+/** Lower case for A to Z only, so that every position stays where it was (full lower-casing can lengthen a string). */
+const asciiLower = (s: string) => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
+/**
+ * `s` with each stretch from `open` to the first `close` after it replaced by
+ * `put`, as /open[\s\S]*?close/g does, in one pass over the text. `lower` is
+ * the text to search in (asciiLower(s) for a search that ignores case). With
+ * `tail`, a close counts only when optional white space and `>` follow it
+ * (`</script >`). The regular expression takes time that grows with the square
+ * of the size when opens have no close; here the search for a close only moves
+ * forward.
+ */
+function replaceStretches(s: string, lower: string, open: string, close: string, tail: boolean, put: string): string {
+  const out: string[] = [];
+  let i = 0;
+  // The next close that counts, at or after the last place asked for: -2 not looked for yet, -1 none left.
+  let closeStart = -2;
+  let closeEnd = -1;
+  const nextClose = (from: number): boolean => {
+    if (closeStart === -1) return false;
+    if (closeStart >= from) return true;
+    let k = from;
+    for (;;) {
+      const c = lower.indexOf(close, k);
+      if (c < 0) {
+        closeStart = -1;
+        return false;
+      }
+      let e = c + close.length;
+      if (tail) {
+        while (e < lower.length && /\s/.test(lower[e])) e++;
+        if (lower[e] !== ">") {
+          k = c + 1;
+          continue;
+        }
+        e++;
+      }
+      closeStart = c;
+      closeEnd = e;
+      return true;
+    }
+  };
+  for (;;) {
+    const o = lower.indexOf(open, i);
+    if (o < 0 || !nextClose(o + open.length)) break; // no close after this open, so none after a later one
+    out.push(s.slice(i, o), put);
+    i = closeEnd;
+  }
+  out.push(s.slice(i));
+  return out.join("");
+}
+
+/**
+ * `s` with each tag that starts with `open` (`<li`, or `<` for any tag) and
+ * runs to the next `>` replaced by `put`, as /<li[^>]*>/g and /<[^>]+>/g do,
+ * in one pass. `minInner`: how many characters there must be between `open`
+ * and `>` (1 for /<[^>]+>/, which leaves `<>` alone).
+ */
+function replaceTags(s: string, lower: string, open: string, minInner: number, put: string): string {
+  const out: string[] = [];
+  let i = 0;
+  let gt = -2; // the next ">" at or after the last place asked for: -2 not looked for yet, -1 none left
+  for (;;) {
+    const o = lower.indexOf(open, i);
+    if (o < 0) break;
+    const from = o + open.length;
+    if (gt !== -1 && gt < from) gt = s.indexOf(">", from);
+    if (gt < 0) break; // no ">" after this tag, so none after a later one
+    if (gt - from < minInner) {
+      out.push(s.slice(i, o + 1));
+      i = o + 1;
+      continue;
+    }
+    out.push(s.slice(i, o), put);
+    i = gt + 1;
+  }
+  out.push(s.slice(i));
+  return out.join("");
+}
+
 /** Strip HTML to readable text (server-side, no DOM). Best-effort. */
 export function htmlToText(html: string): string {
-  const stripped = html
-    .replace(/<script[\s\S]*?<\/script\s*>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, " ");
+  let t = replaceStretches(html, asciiLower(html), "<script", "</script", true, " ");
+  t = replaceStretches(t, asciiLower(t), "<style", "</style", true, " ");
+  t = replaceStretches(t, t, "<!--", "-->", false, " ");
+  t = t.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, "\n");
+  t = replaceTags(t, asciiLower(t), "<li", 0, "• ");
+  const stripped = replaceTags(t, t, "<", 1, " ");
   return decodeEntities(stripped)
     .replace(/\u00A0/g, " ")
     .replace(/[ \t]+/g, " ")
@@ -356,14 +464,53 @@ function parseSimpleSelector(sel: string): HidingSelector | null {
   return { tag, classes, id };
 }
 
+/**
+ * The contents of the page's <style> blocks, as /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi
+ * finds them, in one pass (see replaceStretches for why not the regular expression).
+ */
+function styleBlocks(html: string): string[] {
+  const lower = asciiLower(html);
+  const blocks: string[] = [];
+  let i = 0;
+  for (;;) {
+    const o = lower.indexOf("<style", i);
+    if (o < 0) break;
+    const after = lower[o + 6];
+    if (after !== undefined && /[a-z0-9_]/.test(after)) {
+      i = o + 6; // <styles>, <style2>: another element
+      continue;
+    }
+    const gt = html.indexOf(">", o + 6);
+    if (gt < 0) break;
+    let c = gt + 1;
+    let end = -1;
+    for (;;) {
+      c = lower.indexOf("</style", c);
+      if (c < 0) break;
+      let e = c + 7;
+      while (e < lower.length && /\s/.test(lower[e])) e++;
+      if (lower[e] === ">") {
+        end = e + 1;
+        break;
+      }
+      c += 1;
+    }
+    if (c < 0) break; // no close after this block, so none after a later one
+    blocks.push(html.slice(gt + 1, c));
+    i = end;
+  }
+  return blocks;
+}
+
 /** Pull simple hiding rules (`.x{display:none}`, `span.y{visibility:hidden}`) out of <style> blocks. */
 export function collectHidingRules(html: string): HidingRules {
   const rules: HidingRules = { hide: [], shownClasses: new Set() };
-  for (const block of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)) {
-    const css = block[1].replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const block of styleBlocks(html)) {
+    const css = replaceStretches(block, block, "/*", "*/", false, "");
     const ctx: string[] = [];
     let buf = "";
     for (let i = 0; i < css.length; i++) {
+      tick();
       const c = css[i];
       if (c === "{") {
         const prelude = buf.trim();
@@ -377,6 +524,7 @@ export function collectHidingRules(html: string): HidingRules {
         let j = i + 1;
         let decls = "";
         for (; j < css.length && depth > 0; j++) {
+          tick();
           const cj = css[j];
           if (cj === "{") depth++;
           else if (cj === "}") depth--;
@@ -477,6 +625,7 @@ function elementHidden(name: string, attrs: Map<string, string>, rules: HidingRu
   const id = attrs.get("id");
   const hit = rules.hide.some(
     (r) =>
+      (tick(), true) &&
       (!r.tag || r.tag === name) &&
       (!r.id || r.id === id) &&
       r.classes.every((c) => classes.has(c)),
@@ -507,9 +656,19 @@ export interface SanitizedHtml {
  * `hidden` attribute, aria-hidden="true", closed <dialog>, <template>, inline
  * styles (declarationsHide) and simple class/id/tag rules in <style> blocks.
  */
-export function sanitizeHtml(html: string): SanitizedHtml {
+export function sanitizeHtml(html: string, budgetMs: number = GUARD_BUDGET_MS): SanitizedHtml {
+  const outer = tick;
+  tick = startBudget(budgetMs);
+  try {
+    return sanitizeWithinBudget(html);
+  } finally {
+    tick = outer;
+  }
+}
+
+function sanitizeWithinBudget(html: string): SanitizedHtml {
   const rules = collectHidingRules(html);
-  const lower = html.toLowerCase();
+  const lower = asciiLower(html);
   const out: string[] = [];
   const hiddenParts: string[] = [];
   const comments: string[] = [];
@@ -521,6 +680,16 @@ export function sanitizeHtml(html: string): SanitizedHtml {
   const popTo = (idx: number) => {
     stack.length = idx;
     if (hiddenAt >= 0 && idx <= hiddenAt) hiddenAt = -1;
+  };
+  const push = (name: string) => {
+    if (stack.length >= MAX_HTML_DEPTH) throw new PostingTooComplexError("is nested too deeply");
+    stack.push(name);
+  };
+  // The next ">" at or after the last place asked for: -2 not looked for yet, -1 none left.
+  let gtAhead = -2;
+  const hasGtFrom = (from: number) => {
+    if (gtAhead !== -1 && gtAhead < from) gtAhead = html.indexOf(">", from);
+    return gtAhead >= 0;
   };
   const findOpen = (names: Set<string> | string, boundary: Set<string>): number => {
     for (let k = stack.length - 1; k >= 0; k--) {
@@ -534,6 +703,7 @@ export function sanitizeHtml(html: string): SanitizedHtml {
   const n = html.length;
   let i = 0;
   while (i < n) {
+    tick();
     const lt = html.indexOf("<", i);
     if (lt < 0) {
       emit(html.slice(i));
@@ -557,7 +727,8 @@ export function sanitizeHtml(html: string): SanitizedHtml {
     if (next === "/") {
       const endTag = /<\/([a-zA-Z][^\s/>]*)[^>]*>/y;
       endTag.lastIndex = i;
-      const m = endTag.exec(html);
+      // With no ">" left, no end tag can close: each try would read to the end of the page.
+      const m = hasGtFrom(i) ? endTag.exec(html) : null;
       if (!m) {
         emit("<");
         i++;
@@ -638,7 +809,7 @@ export function sanitizeHtml(html: string): SanitizedHtml {
       if (!isVoid) {
         hidden_elements++;
         hiddenParts.push(raw);
-        stack.push(name);
+        push(name);
         hiddenAt = stack.length - 1;
       }
       continue;
@@ -648,7 +819,7 @@ export function sanitizeHtml(html: string): SanitizedHtml {
       const href = tag.attrs.get("href");
       if (href) hrefs.push(href);
     }
-    if (!isVoid) stack.push(name);
+    if (!isVoid) push(name);
   }
 
   return {
@@ -814,7 +985,7 @@ function normalizeForScan(s: string): string {
 }
 
 const KAIROS_TOOLS =
-  "list_experiences|read_experience|list_applications|read_application|load_context|search_qa_bank|read_qa|save_qa|get_insights_evidence|save_insights|prepare_extraction|resume_health_check|get_enrichment_questions|save_confirmed_fact|save_experience|save_education|save_voice_profile|save_profile|rebuild_index|set_application_status|get_search_profile|save_search_profile|capture_job_ad|fetch_application_form|get_scoring_evidence|save_score|get_generation_evidence|save_resume|get_cover_letter_evidence|save_cover_letter|check_resume_layout|render_docx|render_pdf";
+  "list_experiences|read_experience|list_applications|read_application|load_context|search_qa_bank|read_qa|save_qa|get_insights_evidence|save_insights|prepare_extraction|resume_health_check|get_enrichment_questions|save_confirmed_fact|save_experience|save_education|save_voice_profile|save_profile|rebuild_index|set_application_status|get_search_profile|save_search_profile|capture_job_ad|fetch_application_form|get_scoring_evidence|save_score|get_generation_evidence|save_resume|get_cover_letter_evidence|save_cover_letter|check_resume_layout|render_docx|render_pdf|import_linkedin_connections|list_contacts|get_referral_message_evidence|save_referral_message|set_referral_message_state";
 
 const AI = "(?:ai|llm|large language model|language model|chatbot|chat ?gpt|gpt|claude|gemini|copilot|bot|assistant|agent|model)";
 

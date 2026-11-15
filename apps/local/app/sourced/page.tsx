@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getDeepScan, getSourcedRun, type SourcedPosting } from "@/lib/dashboard";
 import { trackSourcedAction, dismissSourcedAction } from "@/app/actions";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,7 @@ export default async function SourcedPage() {
     <main className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">All sourced roles</h1>
+          <h1 className="text-lg font-semibold">All sourced roles<Byline name="Scout" /></h1>
           <p className="text-muted text-xs">
             Everything the last sweep surfaced, including roles the triage dropped before the board.
             {run?.ran_at && <> Run {run.ran_at.slice(0, 16).replace("T", " ")}.</>}

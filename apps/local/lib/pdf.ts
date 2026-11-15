@@ -38,7 +38,7 @@ export async function htmlToPdf(html: string, paper: "letter" | "a4" = "letter")
   });
   try {
     const page = await browser.newPage();
-    // The HTML carries text from the record and from postings: no scripts, and
+    // The HTML carries text from the knowledge base and from postings: no scripts, and
     // nothing loaded from the network (inline data only).
     await page.setJavaScriptEnabled(false);
     await page.setRequestInterception(true);

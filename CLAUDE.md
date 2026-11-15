@@ -4,14 +4,14 @@ This repository is Kairos Kit, a career-operations system for one user: the
 student who installed it. The **kairos** MCP server (`apps/local/mcp/server.ts`)
 stores everything in the user's data folder, `KAIROS_HOME` (default `~/Kairos`),
 outside this repository. The skill `.claude/skills/kairos/SKILL.md` holds the
-workflows: building the record, scoring a posting, tailoring a résumé, cover
+workflows: building the knowledge base, scoring a posting, tailoring a résumé, cover
 letters on request, application questions, sourcing preferences, interview prep.
 
 Rules:
 1. Before any answer about the user's applications, call `list_applications`.
    The board is the truth; earlier conversation is out of date.
 2. Never invent experience, numbers, titles or dates. Facts come from the
-   user's record or from the user, and every saved fact keeps its source.
+   user's knowledge base or from the user, and every saved fact keeps its source.
 3. Change data only through the MCP tools (`save_*`, `set_application_status`).
    After a direct file edit, call `rebuild_index`.
 4. The user's data never goes into this repository. Do not copy files from

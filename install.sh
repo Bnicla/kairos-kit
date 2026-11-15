@@ -5,8 +5,8 @@
 #   ./install.sh --yes               accept the defaults, no services
 #   ./install.sh --home ~/MyKairos   data folder somewhere else (default ~/Kairos)
 #   ./install.sh --use-existing      accept a data folder that already holds a
-#                                    record this kit did not create
-#   ./install.sh --demo              start the data folder from the demo record
+#                                    knowledge base this kit did not create
+#   ./install.sh --demo              start the data folder from the demo knowledge base
 #   ./install.sh --dashboard         install the dashboard as a login service
 #   ./install.sh --daily 08:15       install the daily job search at that time
 #   ./install.sh --schedule-only --daily 08:00
@@ -19,7 +19,7 @@
 #              for testing), --port <n> (dashboard port, default 3000).
 #
 # It never changes an existing data folder. A folder that already holds a
-# record (profile.md, knowledge-base/ or applications/) that this kit did not
+# knowledge base (profile.md, knowledge-base/ or applications/) that this kit did not
 # create is refused unless --use-existing is given, so a second install on a
 # Mac never writes into someone else's record.
 #
@@ -87,15 +87,15 @@ echo
 
 # --- 0. Whose data folder is this? -------------------------------------------------
 # A folder this kit made carries .kairos-kit. A folder recorded by an earlier
-# run of this kit was already accepted. Anything else that holds a record is
+# run of this kit was already accepted. Anything else that holds a knowledge base is
 # refused without --use-existing.
 holds_record() { [ -e "$1/profile.md" ] || [ -d "$1/knowledge-base" ] || [ -d "$1/applications" ]; }
 if [ -e "$HOME_DIR" ] && holds_record "$HOME_DIR" && [ ! -e "$HOME_DIR/.kairos-kit" ] \
    && [ "$HOME_DIR" != "$PREV" ] && [ "$USE_EXISTING" = 0 ]; then
-  print -P "%F{red}✗%f $HOME_DIR already holds a Kairos record that this kit did not create."
+  print -P "%F{red}✗%f $HOME_DIR already holds a Kairos knowledge base that this kit did not create."
   echo "  Nothing was changed. Choose one:"
   echo "    ./install.sh --home ~/KairosKit        a new data folder for this kit"
-  echo "    ./install.sh --use-existing            use this record (the kit will write into it)"
+  echo "    ./install.sh --use-existing            use this knowledge base (the kit will write into it)"
   exit 1
 fi
 if [ "$SCHEDULE_ONLY" = 1 ]; then
@@ -152,7 +152,7 @@ else
     mkdir -p "$(dirname "$HOME_DIR")"
     cp -R "$KIT/demo" "$HOME_DIR"
     find "$HOME_DIR" -name .gitkeep -delete
-    ok "Data folder created from the demo record: $HOME_DIR"
+    ok "Data folder created from the demo knowledge base: $HOME_DIR"
   else
     mkdir -p "$HOME_DIR"/{knowledge-base/experiences,knowledge-base/education,applications,sourcing,logs}
     ok "Data folder created: $HOME_DIR"

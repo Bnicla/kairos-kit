@@ -7,6 +7,8 @@ import Timeline from "@/components/Timeline";
 import { archiveAction, deleteApplicationAction, generateDocAction, setStatusAction, markSubmittedAction } from "@/app/actions";
 import GenerateDocButton from "@/components/GenerateDocButton";
 import LineOrigins from "@/components/LineOrigins";
+import Referrals from "@/components/Referrals";
+import ReferralMessages from "@/components/ReferralMessages";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +16,13 @@ import { ALL_STATUSES, STATUS_META } from "@kairos/engine/applications";
 import { isWritingQuestion, type ApplicationForm } from "@kairos/engine/forms";
 import type { ApplicationQuestion } from "@/lib/dashboard";
 import type { RequirementCoverageRow } from "@kairos/engine/types";
+import Byline from "@/components/Byline";
 
 export default async function ApplicationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const app = await getApplication(id);
   if (!app) notFound();
-  const { meta, report, scoreVersions, jobText, resumeHtml, coverLetterHtml, questions, form, generationError, downloads, requirementCoverage, lineOrigins } = app;
+  const { meta, report, scoreVersions, jobText, resumeHtml, coverLetterHtml, questions, form, generationError, downloads, requirementCoverage, lineOrigins, referrals, referralMessages } = app;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -138,6 +141,12 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
         <Timeline meta={meta} />
       </section>
 
+      {/* People the user knows at the company: only for a well-matched application with at least one contact */}
+      {referrals && <Referrals referrals={referrals} />}
+
+      {/* Message drafts to those people: written on request, sent by the user */}
+      <ReferralMessages appId={id} messages={referralMessages} />
+
       {/* On the local lane, generation and tailoring run through Claude Code,
           not this viewer. Point there whenever the résumé doesn't exist yet. */}
       {!resumeHtml && (
@@ -185,13 +194,13 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
       {/* Requirements coverage: each requirement in the ad, matched to résumé evidence or marked as a gap */}
       {requirementCoverage && <CoverageTable rows={requirementCoverage} />}
 
-      {/* Line origins: each résumé line beside the fact of the record it comes from (collapsed) */}
+      {/* Line origins: each résumé line beside the fact of the knowledge base it comes from (collapsed) */}
       {lineOrigins && <LineOrigins view={lineOrigins} />}
 
       {/* Prep notes — briefs and reconstructions kept in the application folder */}
       {app.prepNotes.length > 0 && (
         <section className="card mb-6 p-5">
-          <h2 className="text-muted mb-2 text-xs font-medium uppercase tracking-wide">Prep notes</h2>
+          <h2 className="text-muted mb-2 text-xs font-medium uppercase tracking-wide">Prep notes<Byline name="Interview Coach" /></h2>
           <ul className="space-y-1 text-sm">
             {app.prepNotes.map((n) => (
               <li key={n}>
@@ -221,7 +230,7 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
       {report && (
         <details className="mb-6" open={scoreVersions.length < 2}>
           <summary className="text-muted mb-3 cursor-pointer text-xs font-medium uppercase tracking-wide">
-            Full assessment (three axes)
+            Full assessment (three axes)<Byline name="Assessor" />
           </summary>
           <Scorecard report={report} />
         </details>
@@ -233,7 +242,7 @@ export default async function ApplicationPage({ params }: { params: Promise<{ id
       {/* Application questions */}
       {questions.length > 0 && (
         <section className="mb-6">
-          <h2 className="text-muted mb-2 text-xs font-medium uppercase tracking-wide">Application questions</h2>
+          <h2 className="text-muted mb-2 text-xs font-medium uppercase tracking-wide">Application questions<Byline name="Writer" /></h2>
           <div className="space-y-3">
             {questions.map((q, i) => (
               <div key={i} className="card p-4">

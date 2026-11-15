@@ -32,7 +32,7 @@ describe("reconcile_sources", () => {
     expect(normCompany("Lumen Analytics, Inc.")).toBe("lumen analytics");
   });
 
-  it("one résumé into an empty record: everything new, no questions", () => {
+  it("one résumé into an empty knowledge base: everything new, no questions", () => {
     const r = reconcileSources([resume], { experiences: [], education: [] });
     expect(r.questions).toEqual([]);
     expect(r.experiences.map((x) => x.status)).toEqual(["new", "new"]);

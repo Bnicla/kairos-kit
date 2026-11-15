@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getGapReport } from "../../lib/dashboard";
 import KbNav from "../../components/KbNav";
+import Byline from "@/components/Byline";
 import {
   BAND_WEIGHT,
   DEFAULT_WINDOW_DAYS,
@@ -109,7 +110,7 @@ export default async function GapsPage({ searchParams }: { searchParams: Promise
     <div className="mx-auto max-w-[1400px] px-4 py-4">
       <KbNav active="/gaps" />
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-lg font-semibold tracking-tight">Gaps across postings</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Gaps across postings<Byline name="Assessor" /></h1>
         <div className="text-muted flex items-center gap-1 text-xs">
           {WINDOWS.map((w) => (
             <Link

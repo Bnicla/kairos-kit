@@ -2,7 +2,7 @@
 
 This page explains how the parts of the kit fit together, where the user's data
 lives, how one application moves from a posting to a submitted form, and which
-controls keep the output true to the user's own record. The design decisions
+controls keep the output true to the user's own knowledge base. The design decisions
 behind it are in [`docs/adr`](adr/README.md).
 
 ## The parts
@@ -24,13 +24,13 @@ flowchart LR
 | Part | What it does | Where |
 |---|---|---|
 | Claude Code | The agent. It talks with the user, follows the skill and calls the MCP tools. The kit adds no agent loop of its own. | — |
-| Skill and commands | The workflows in plain language: building the record, scoring, tailoring, cover letters on request, application answers, interview prep, form filling. | `.claude/skills/kairos/SKILL.md`, `.claude/commands/*.md` |
+| Skill and commands | The workflows in plain language: building the knowledge base, scoring, tailoring, cover letters on request, application answers, interview prep, form filling. | `.claude/skills/kairos/SKILL.md`, `.claude/commands/*.md` |
 | MCP server | 46 tools that read and write the data folder. Each tool that needs judgment returns the evidence and the prompt; Claude Code writes the result, and the matching `save_*` tool checks it in code before anything is written. | `apps/local/mcp/server.ts` |
-| Engine | The code the server, the dashboard and the scripts share: scoring evidence, résumé checks, rendering, the job search, the record's health check. No model calls. | `packages/engine` |
+| Engine | The code the server, the dashboard and the scripts share: scoring evidence, résumé checks, rendering, the job search, the knowledge base's health check. No model calls. | `packages/engine` |
 | Data folder | Everything about the user, as Markdown and JSON files. Outside the repository. | `KAIROS_HOME`, default `~/Kairos` |
-| Dashboard | A local web page over the data folder: the board, the record, sourced roles, the funnel. It answers only on this computer. | `apps/local/app` |
+| Dashboard | A local web page over the data folder: the board, the knowledge base, sourced roles, the funnel. It answers only on this computer. | `apps/local/app` |
 | Daily job search | Reads public job-board APIs, filters and ranks postings against the user's search profile, and puts the best on the board as Sourced. | `scripts/daily.sh`, `apps/local/scripts/sourcing-run.mts`, `packages/engine/sourcing` |
-| Chrome extension | Optional. Fills Greenhouse, Lever and Ashby forms from the record. | `apps/autofill-extension` |
+| Chrome extension | Optional. Fills Greenhouse, Lever and Ashby forms from the knowledge base. | `apps/autofill-extension` |
 
 Model calls happen in two places only. Claude Code, under the user's own Claude
 plan, does the conversation and the writing. A few unattended steps (the daily
@@ -49,7 +49,7 @@ search's triage, the dashboard's résumé and form-mapping buttons) run
     experiences/NN-company-role.md  one file per role: facts with their source tags
     education/*.md
     metrics-register.md           every number, with its source and whether it can be used
-    star-stories.json             interview stories built from the record
+    star-stories.json             interview stories built from the knowledge base
     _writing-samples.md           the user's own writing, for style only
   applications/<id>/
     application-meta.json         company, role, status, dates
@@ -78,7 +78,7 @@ only through the MCP tools; a direct edit needs `rebuild_index` afterwards.
 
 ## One application, start to finish
 
-1. **Sourced.** The daily search fetches postings from about 14,700 public
+1. **Sourced (Scout).** The daily search fetches postings from about 14,700 public
    company job boards (`packages/engine/sourcing/registry.json`), applies the
    search profile's filters in code (`filter.ts`), ranks what is left, and sends
    the top of the list to a short triage call. Kept postings appear on the
@@ -87,27 +87,28 @@ only through the MCP tools; a direct edit needs `rebuild_index` afterwards.
    is over 30 days old and writes the refreshed list to `sourcing/registry.json`
    in the data folder. The search reads that copy when it exists and the kit's
    own file otherwise.
-2. **Scored.** `/score` reads the posting, gets the user's evidence with
+2. **Scored (Assessor).** `/score` reads the posting, gets the user's evidence with
    `get_scoring_evidence` (unverified facts already removed), and saves a fit
    score with the gaps (`save_score`). Text from the posting is cleaned of
    hidden markup first (`posting-guard.ts`).
-3. **Tailored.** `/tailor` gets the generation evidence, writes the résumé, and
+3. **Tailored (Writer).** `/tailor` gets the generation evidence, writes the résumé, and
    calls `save_resume`. The save is refused if a number, a count, an employer,
    an organisation named as a place of work or a credential is not in the
-   record, if a coverage row quotes text that is not on the résumé, or if the
-   résumé uses a phrasing the record forbids. The result lists the bullets and
-   summary sentences the record does not fully support, such as a claim of
-   ownership, wording stronger than the record's, or a number attached to
+   knowledge base, if a coverage row quotes text that is not on the résumé, or if the
+   résumé uses a phrasing the knowledge base forbids. The result lists the bullets and
+   summary sentences the knowledge base does not fully support, such as a claim of
+   ownership, wording stronger than the knowledge base's, or a number attached to
    another result ("stretch check"); the user keeps, softens or drops each
    one.
-   `check_resume_layout` renders the file and checks page count, the page
-   break and the text a hiring system reads.
-4. **Answers and letter.** Application questions draw on earlier approved
+   The save also renders the file and returns its layout: page count, the
+   page break and the text a hiring system reads (`check_resume_layout` gives
+   the same measure on request).
+4. **Answers and letter (Writer).** Application questions draw on earlier approved
    answers (`search_qa_bank`). A cover letter is written only when the user asks.
 5. **Applied.** `/apply` fills the form in the user's Chrome one page at a time
    from `get_form_profile`, shows its plan, and stops at the review page. The
    user submits. `set_application_status` records it.
-6. **After.** `/prep` builds interview preparation from the record. The board and
+6. **After.** `/prep` builds interview preparation from the knowledge base (Interview Coach). The board and
    the funnel page track every application to its outcome.
 
 ## Controls
@@ -118,9 +119,9 @@ keep the two apart.
 
 | Risk | Control | Where |
 |---|---|---|
-| A made-up fact in a résumé | Résumés are written only from the record; numbers must appear word for word in their source; coverage rows must quote the résumé; ownership claims need a verified fact. The checks are code, not a model's judgment. | `save_resume` in `apps/local/mcp/server.ts`; `packages/engine/stretch.ts`; ADR 0002 |
-| A made-up number in a cover letter | Every number in a letter must appear in the verified record, the profile, education or the posting. Other claims in a letter are not checked in code: the user reviews the letter before using it. | `save_cover_letter`; `ungroundedNumbers` in `packages/engine/tools/checks.ts` |
-| A posting that tells Claude to save something | Every save of personal data shows the user the full change, what is new and what would be removed, in a Claude Code confirmation the model cannot answer: the record (`save_confirmed_fact`, `save_experience`, `save_education`, `save_metric`, `save_profile`), application answers (`save_qa`), form answers (`save_autofill`), interview stories, writing samples, the voice profile and the search settings. A change too long to show in full is refused, never cut. Nothing is saved without the user's Accept. | `apps/local/lib/record-confirm.ts`; ADR 0003 |
+| A made-up fact in a résumé | Résumés are written only from the knowledge base; numbers must appear word for word in their source; coverage rows must quote the résumé; ownership claims need a verified fact. The checks are code, not a model's judgment. | `save_resume` in `apps/local/mcp/server.ts`; `packages/engine/stretch.ts`; ADR 0002 |
+| A made-up number in a cover letter | Every number in a letter must appear in the verified knowledge base, the profile, education or the posting. Other claims in a letter are not checked in code: the user reviews the letter before using it. | `save_cover_letter`; `ungroundedNumbers` in `packages/engine/tools/checks.ts` |
+| A posting that tells Claude to save something | Every save of personal data shows the user the full change, what is new and what would be removed, in a Claude Code confirmation the model cannot answer: the knowledge base (`save_confirmed_fact`, `save_experience`, `save_education`, `save_metric`, `save_profile`), application answers (`save_qa`), form answers (`save_autofill`), interview stories, writing samples, the voice profile and the search settings. A change too long to show in full is refused, never cut. Nothing is saved without the user's Accept. | `apps/local/lib/record-confirm.ts`; ADR 0003 |
 | Unverified facts reaching a model | `[?]` facts are removed in code from the evidence tools, `read_experience` and `load_context`. Only `read_experience` with `for_editing: true`, used to re-save a file, returns them, marked. | ADR 0004 |
 | Hidden text in a posting | Hidden elements and markup are removed before the text is used, for links, pasted text and the extension's captures alike; a page that is mostly hidden is refused. | `packages/engine/posting-guard.ts`, `ingest.ts` |
 | A link that points at this computer or the local network | Only http and https; hosts on this computer or a private network are refused, including IPv4 addresses written inside IPv6, and every redirect is checked again. | `packages/engine/safe-fetch.ts` |
@@ -143,7 +144,7 @@ What the controls do not cover is in [SECURITY.md](../SECURITY.md).
 | A tool's input, output or checks | `apps/local/mcp/server.ts` |
 | Scoring evidence | `packages/engine/pipeline.ts`, `packages/engine/prompts` |
 | Résumé checks and rendering | `packages/engine/stretch.ts`, `length-policy.ts`, `resume-render.ts`, `docx-render.ts`, `ats-text.ts` |
-| The record's health check | `packages/engine/health.ts` |
+| The knowledge base's health check | `packages/engine/health.ts` |
 | `/setup` sections | `packages/engine/setup/sections.ts` (the checklist in `docs/kit-setup-checklist.md` is generated from it) |
 | The job search | `packages/engine/sourcing` (`sweep.ts`, `filter.ts`, `backlog.ts`), `apps/local/scripts/sourcing-run.mts` |
 | The dashboard | `apps/local/app`, `apps/local/components`, `apps/local/lib/dashboard.ts` |

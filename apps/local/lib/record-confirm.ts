@@ -1,9 +1,9 @@
 /**
- * The user's own approval for a write to their record (anti prompt-injection).
+ * The user's own approval for a write to their knowledge base (anti prompt-injection).
  *
  * Claude Code runs the conversation, so this server never sees what the user
  * typed and cannot check a fact against it (the hosted version's attribution
- * guard does that). Instead, every tool that puts facts into the record asks
+ * guard does that). Instead, every tool that puts facts into the knowledge base asks
  * the user directly through an MCP elicitation: Claude Code shows the request
  * to the user, outside the model, and only the user's Accept lets the write
  * through. A job posting that talks Claude into calling a save tool still
@@ -39,12 +39,62 @@ export function removedLines(before: string | null | undefined, after: string): 
   return newLines(after, before ?? "");
 }
 
-/** The preview of a replaced file: what is new or changed, then what would be removed. */
-export function diffPreview(added: string[], removed: string[]): string[] {
+/** The preview of a replaced file: what is new or changed, then what would be removed, then what moves. */
+export function diffPreview(added: string[], removed: string[], moved: string[] = []): string[] {
   const out: string[] = [];
   if (added.length) out.push("New or changed:", ...added.map((l) => `+ ${l}`));
   if (removed.length) out.push(...(out.length ? [""] : []), "Removed:", ...removed.map((l) => `- ${l}`));
+  if (moved.length) out.push(...(out.length ? [""] : []), "Moved to another section:", ...moved.map((l) => `~ ${l}`));
   return out;
+}
+
+/** Each non-empty line of a Markdown text with the heading it stands under ("" before the first heading). */
+function linesBySection(text: string | null | undefined): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let section = "";
+  for (const raw of (text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    out.set(line, [...(out.get(line) ?? []), heading ? "(a heading)" : section]);
+    if (heading) section = heading[1].trim();
+  }
+  return out;
+}
+
+/**
+ * What changes between two Markdown texts, for a preview that leaves nothing
+ * out. Beyond new and removed lines (newLines, removedLines) it finds the two
+ * changes those miss, because they compare which lines exist and not where or
+ * how often: a line that now stands under another heading, and a line that is
+ * repeated or loses a copy.
+ */
+export function bodyChanges(before: string | null | undefined, after: string): { added: string[]; removed: string[]; moved: string[] } {
+  const was = linesBySection(before);
+  const now = linesBySection(after);
+  const added: string[] = [];
+  const removed: string[] = [];
+  const moved: string[] = [];
+  const under = (s: string) => (s === "" ? "the top of the file" : `"${s}"`);
+  for (const [line, places] of now) {
+    const had = was.get(line);
+    if (!had) added.push(places.length > 1 ? `${line} (${places.length} times)` : line);
+    else if (places.length > had.length) added.push(`${line} (repeated: ${places.length} times, ${had.length} before)`);
+    else if (places.length < had.length) removed.push(`${line} (${had.length - places.length} of its ${had.length} copies)`);
+    else {
+      const from = [...had].sort();
+      const to = [...places].sort();
+      if (from.join("\n") !== to.join("\n")) moved.push(`${line} (from ${[...new Set(from)].map(under).join(", ")} to ${[...new Set(to)].map(under).join(", ")})`);
+    }
+  }
+  for (const [line, places] of was) if (!now.has(line)) removed.push(places.length > 1 ? `${line} (${places.length} times)` : line);
+  return { added, removed, moved };
+}
+
+/** The preview of a Markdown file that is replaced: new, removed, moved and repeated lines. */
+export function markdownDiff(before: string | null | undefined, after: string): string[] {
+  const c = bodyChanges(before, after);
+  return diffPreview(c.added, c.removed, c.moved);
 }
 
 /** A JSON value as "path: value" lines, for a preview (keys in `skip` left out, e.g. timestamps). */
@@ -74,7 +124,30 @@ export function clip(lines: string[]): string {
   return lines.join("\n");
 }
 
-const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
+/**
+ * A value as a person reads it, with nothing left out: a list as its items,
+ * an object as "key: value" pairs (its name first when it has one). A client
+ * may show the confirmation as one paragraph, where raw JSON is hard to read.
+ */
+export function show(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "none";
+  if (Array.isArray(v)) {
+    if (!v.length) return "(none)";
+    return v.map(show).join(v.some((x) => x !== null && typeof x === "object") ? "; " : ", ");
+  }
+  if (typeof v === "object") {
+    const { name, ...rest } = v as Record<string, unknown>;
+    const named = typeof name === "string" && name.trim() !== "";
+    const pairs = Object.entries(named ? rest : (v as Record<string, unknown>))
+      .filter(([, x]) => x !== undefined)
+      .map(([k, x]) => `${k}: ${show(x)}`)
+      .join(", ");
+    if (named) return pairs ? `${name} (${pairs})` : (name as string);
+    return pairs || "(empty)";
+  }
+  return String(v);
+}
 
 /** Frontmatter fields that are new or changed, as "key: value" lines. */
 export function changedFields(before: Record<string, unknown> | null | undefined, after: Record<string, unknown>, skip: string[] = []): string[] {
@@ -88,6 +161,22 @@ export function changedFields(before: Record<string, unknown> | null | undefined
   return out;
 }
 
+/** Frontmatter fields that the new version no longer has, as "key: value" lines: saving drops them. */
+export function removedFields(before: Record<string, unknown> | null | undefined, after: Record<string, unknown>, skip: string[] = []): string[] {
+  return Object.entries(before ?? {})
+    .filter(([k, v]) => v !== undefined && !skip.includes(k) && after[k] === undefined)
+    .map(([k, v]) => `${k}: ${show(v)}`);
+}
+
+/**
+ * The preview of a knowledge base file with frontmatter that is replaced whole (a role, an education entry): changed
+ * and new fields and lines, the fields and lines that go, and the lines that move or are repeated.
+ */
+export function recordFileDiff(before: { data: Record<string, unknown>; content: string } | null | undefined, frontmatter: Record<string, unknown>, body: string, skip: string[] = []): string[] {
+  const c = bodyChanges(before?.content, body);
+  return diffPreview([...changedFields(before?.data, frontmatter, skip), ...c.added], [...removedFields(before?.data, frontmatter, skip), ...c.removed], c.moved);
+}
+
 /**
  * Ask the user to approve one write. Returns null when approved, or the
  * message to return to Claude when not (nothing is saved). A preview too long
@@ -97,11 +186,11 @@ export async function askToSave(
   c: Confirmer,
   what: string,
   preview: string | string[],
-  verb = "saves this to your record",
+  verb = "saves this to your knowledge base",
   decline = "Decline if you did not say it or it is wrong.",
 ): Promise<string | null> {
   if (!c.supportsElicitation()) {
-    return "Nothing was saved. Kairos asks you to approve every change to your record in a confirmation from Claude Code, and this Claude Code did not offer one. Update Claude Code (claude update) and try again.";
+    return "Nothing was saved. Kairos asks you to approve every change to your knowledge base in a confirmation from Claude Code, and this Claude Code did not offer one. Update Claude Code (claude update) and try again.";
   }
   const lines = (Array.isArray(preview) ? preview : preview.split("\n")).map((l) => l.trimEnd());
   if (!fits(lines)) {

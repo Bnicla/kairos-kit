@@ -1,4 +1,5 @@
 import type { Experience } from "@kairos/engine/kb/types";
+import { worded } from "@kairos/engine/wording";
 import { serializeExperience, stripUnverified } from "@kairos/engine/kb/experience";
 import { BANNED_WORDS } from "@kairos/engine/prompts/voice";
 import type { GeneratedResume, RequirementCoverageRow } from "@kairos/engine/types";
@@ -241,10 +242,10 @@ export const ADVISORY_GROUNDING: ReadonlySet<GroundingIssue["kind"]> = new Set([
  *    as a number in the verified text of that employer (2026-11-12: the
  *    provenance comparison showed a count the KB never states passed the gate).
  *    In the summary the number may be anywhere in the evidence; a count found
- *    nowhere blocks, unless the record could add up to it across roles (see
+ *    nowhere blocks, unless the knowledge base could add up to it across roles (see
  *    `composableTotal`): the stretch check then lists it as a total
  *  - a credential (skills line or prose) must be in the verified evidence, and
- *    so must every education entry when the record holds education; a named
+ *    so must every education entry when the knowledge base holds education; a named
  *    tool or acronym on the skills line found nowhere in it is reported, not
  *    blocked
  *  - an organisation named in prose after "at" ("At Acme, I …", "two years at
@@ -259,7 +260,7 @@ export function checkResumeGrounding(
   experiences: Experience[],
   extraCorpus = "",
   opts: {
-    /** The record holds education entries (they are in `extraCorpus`): check the résumé's education against them. */
+    /** The knowledge base holds education entries (they are in `extraCorpus`): check the résumé's education against them. */
     educationRecorded?: boolean;
     /** The company the résumé is written for. Naming it inside a sentence ("the design team at Acme") is not a claim to have worked there. */
     targetCompany?: string;
@@ -282,7 +283,7 @@ export function checkResumeGrounding(
 
   for (const exp of gen.resume.experience) {
     if (!companies.has(exp.company.toLowerCase().trim())) {
-      issues.push({ kind: "unknown_employer", detail: `"${exp.company}" is not a knowledge-base experience` });
+      issues.push({ kind: "unknown_employer", detail: worded`"${exp.company}" is not a knowledge-base experience` });
     }
   }
 
@@ -290,7 +291,7 @@ export function checkResumeGrounding(
   const prose = resumeClaimText(gen);
   for (const token of extractMetricTokens(prose)) {
     if (!corpus.includes(token.normalized)) {
-      issues.push({ kind: "ungrounded_metric", detail: `"${token.raw}" not found in any verified KB fact` });
+      issues.push({ kind: "ungrounded_metric", detail: worded`"${token.raw}" not found in any verified KB fact` });
     }
   }
 
@@ -306,7 +307,7 @@ export function checkResumeGrounding(
       if (!own.includes(token.normalized) && !extra.includes(token.normalized)) {
         issues.push({
           kind: "metric_source_mismatch",
-          detail: `"${token.raw}" under "${exp.company}" is not in that experience's verified facts (it exists elsewhere in the KB — a true number from one role cannot support a claim in another)`,
+          detail: worded`"${token.raw}" under "${exp.company}" is not in that experience's verified facts (it exists elsewhere in the KB — a true number from one role cannot support a claim in another)`,
         });
       }
     }
@@ -326,10 +327,10 @@ export function checkResumeGrounding(
   for (const token of extractCountTokens(gen.resume.executive_summary)) {
     if (allNumbers.has(token.value)) continue;
     // "Five products", "three markets": a total composed across roles is on no
-    // single line. When the record could add up to it, the save is not blocked
+    // single line. When the knowledge base could add up to it, the save is not blocked
     // and the stretch check lists the total for the candidate to confirm.
     if (composableTotal(token, entryTexts)) continue;
-    issues.push({ kind: "ungrounded_count", detail: `"${token.raw}" (summary): the number ${token.value} is not in any verified KB fact` });
+    issues.push({ kind: "ungrounded_count", detail: worded`"${token.raw}" (summary): the number ${token.value} is not in any verified KB fact` });
   }
   for (const exp of gen.resume.experience) {
     const own = numbersByCompany.get(exp.company.toLowerCase().trim());
@@ -338,15 +339,15 @@ export function checkResumeGrounding(
       if (own.has(token.value) || extraNumbers.has(token.value)) continue;
       issues.push(
         allNumbers.has(token.value)
-          ? { kind: "count_source_mismatch", detail: `"${token.raw}" under "${exp.company}": the number ${token.value} is not in that experience's verified facts (it exists elsewhere in the KB)` }
-          : { kind: "ungrounded_count", detail: `"${token.raw}" under "${exp.company}": the number ${token.value} is not in any verified KB fact` },
+          ? { kind: "count_source_mismatch", detail: worded`"${token.raw}" under "${exp.company}": the number ${token.value} is not in that experience's verified facts (it exists elsewhere in the KB)` }
+          : { kind: "ungrounded_count", detail: worded`"${token.raw}" under "${exp.company}": the number ${token.value} is not in any verified KB fact` },
       );
     }
   }
 
-  // Organisations named in prose. An employer of the record, or a name a
+  // Organisations named in prose. An employer of the knowledge base, or a name a
   // verified fact, the profile or the education record holds, is accepted; a
-  // name found nowhere is an organisation the record does not know.
+  // name found nowhere is an organisation the knowledge base does not know.
   const companyNames = experiences.map((e) => e.frontmatter.company);
   const recorded = [...rawByCompany.values()].join("\n");
   const proseUnits = [
@@ -359,7 +360,7 @@ export function checkResumeGrounding(
       if (org.status !== "unknown") continue;
       // "At <the hiring company>, I …" opening a sentence is still a claim to have worked there.
       if (!org.opening && target.length && proseOrganisations(`at ${org.name}`, target, "")[0]?.status === "company") continue;
-      issues.push({ kind: "unknown_organisation", detail: `"at ${org.name}" (${unit.where}): "${org.name}" is not an employer of the knowledge base and is named in no verified fact` });
+      issues.push({ kind: "unknown_organisation", detail: worded`"at ${org.name}" (${unit.where}): "${org.name}" is not an employer of the knowledge base and is named in no verified fact` });
     }
   }
 
@@ -377,7 +378,7 @@ export function checkResumeGrounding(
     // The name must be on one line; the marker word itself ("certified") need not be.
     const words = [...wordSet(phrase)].filter((w) => !CREDENTIAL_MARKER.test(w));
     if (words.length && !onOneLine(words)) {
-      issues.push({ kind: "ungrounded_credential", detail: `"${phrase.trim()}" (${where}) is not a credential in the verified KB evidence` });
+      issues.push({ kind: "ungrounded_credential", detail: worded`"${phrase.trim()}" (${where}) is not a credential in the verified KB evidence` });
     }
   };
   for (const skill of gen.resume.skills ?? []) {
@@ -391,7 +392,7 @@ export function checkResumeGrounding(
     const rest = items.filter((seg) => !credentials.includes(seg));
     const missing = namedTerms(rest, colon > 0 || segments.length === 1).filter((t) => !GENERIC_ACRONYMS.has(singular(t.toLowerCase()))).filter((t) => !evidenceTerms.has(t.toLowerCase()) && !evidenceTerms.has(singular(t.toLowerCase())));
     if (missing.length) {
-      issues.push({ kind: "ungrounded_skill", detail: `"${skill}" (skills): ${missing.map((m) => `"${m}"`).join(", ")} appears nowhere in the verified KB evidence` });
+      issues.push({ kind: "ungrounded_skill", detail: worded`"${skill}" (skills): ${missing.map((m) => `"${m}"`).join(", ")} appears nowhere in the verified KB evidence` });
     }
   }
   for (const phrase of credentialPhrases(prose)) credentialIssue(phrase, "résumé text");
@@ -402,7 +403,7 @@ export function checkResumeGrounding(
     const credential = [...wordSet(ed.credential)];
     const known = credential.filter((w) => evidenceWords.has(w)).length;
     if ((institution.length && !onOneLine(institution)) || (credential.length && known * 2 < credential.length)) {
-      issues.push({ kind: "ungrounded_credential", detail: `"${ed.credential}, ${ed.institution}" (education) is not in the verified KB evidence` });
+      issues.push({ kind: "ungrounded_credential", detail: worded`"${ed.credential}, ${ed.institution}" (education) is not in the verified KB evidence` });
     }
   }
 
@@ -413,7 +414,7 @@ export function checkResumeGrounding(
     if (!namesKnownSource(entry.source_experience)) {
       issues.push({
         kind: "unknown_source",
-        detail: `provenance source "${entry.source_experience}" is not a KB experience (use a file name, id, or company from the KB)`,
+        detail: worded`provenance source "${entry.source_experience}" is not a KB experience (use a file name, id, or company from the KB)`,
       });
     }
   }
@@ -421,14 +422,14 @@ export function checkResumeGrounding(
 }
 
 /**
- * The record entries a provenance source label names, by ANY of their
+ * The knowledge base entries a provenance source label names, by ANY of their
  * identifiers: file name, frontmatter id, or company. The guarantee is "traces
  * to a real experience", not "spelled one particular way": a label that adds a
  * title or a detail ("Acme (Senior PM)", "Education: B.S. ...") is read by its
  * head. Seven of eight blocked saves in the provenance run of 2026-11-12 were
  * such labels, none about a fact. Returns an empty list for the curated
  * sources (profile, education), which are not entries, and null when the label
- * names nothing in the record.
+ * names nothing in the knowledge base.
  */
 export function auditSourceExperiences(label: string, experiences: Experience[]): Experience[] | null {
   const ref = label.replace(/\.md\b/, "").trim().toLowerCase();
@@ -528,9 +529,9 @@ interface MetricToken {
  */
 /**
  * Numbers in a free-form document (a cover letter) that appear nowhere in the
- * sources it may use: the verified record (unverified facts removed), plus
+ * sources it may use: the verified knowledge base (unverified facts removed), plus
  * `extraCorpus` (profile, education, the posting itself). Each returned token
- * is a number the writer could not have taken from the record.
+ * is a number the writer could not have taken from the knowledge base.
  */
 export function ungroundedNumbers(text: string, experiences: Experience[], extraCorpus = ""): string[] {
   const corpus = experiences.map((e) => normalizeMetrics(serializeExperience(stripUnverified(e)))).join("\n") + "\n" + normalizeMetrics(extraCorpus);
@@ -680,7 +681,7 @@ export interface ProseOrganisation {
   /** "At <Name>, …" opening a sentence: the name is given as the place of work. */
   opening: boolean;
   /**
-   * company: an employer of the record. extra: named in the profile, the base
+   * company: an employer of the knowledge base. extra: named in the profile, the base
    * résumé or the education record. recorded: named in a verified fact (a
    * client, a partner, a site). unknown: named nowhere.
    */
@@ -708,7 +709,7 @@ const orgTokens = (s: string) =>
  * Organisations a résumé line names after "at": "At Acme, I built …", "two
  * years at Acme Robotics". A name is read as a run of capitalized words (with
  * "of", "and", "&" between them); the bold lead-in of a bullet is a title and
- * is left out. Each name is looked up in the record: the employers first, then
+ * is left out. Each name is looked up in the knowledge base: the employers first, then
  * the profile, base résumé and education (`extra`), then the verified facts
  * (`recorded`). A name of several words is found when it, or its first two
  * words or more, appear together. English only: the rule reads the word "at".
@@ -746,7 +747,7 @@ export function proseOrganisations(text: string, companies: string[], recorded: 
     if (NOT_ORG.has(words[0]!.toLowerCase()) || AT_OF_A_VERB.test(before) || (owner < 0 && ORG_QUALIFIES.test(after))) continue;
     const opening = m[1] === "At" && (before === "" || /[.!?;:•\n-]$/.test(before));
     // "at Acme and Borealis": two names, each looked up on its own, unless the
-    // record writes the whole as one name ("Crane & Wills Advisory").
+    // knowledge base writes the whole as one name ("Crane & Wills Advisory").
     const strict = statusOf(name, false);
     if (!strict) continue;
     const parts = strict === "unknown" ? name.split(/\s+(?:and|&)\s+/) : [name];
@@ -761,9 +762,9 @@ export function proseOrganisations(text: string, companies: string[], recorded: 
 /**
  * Whether a count of the summary can be a total composed across roles: what it
  * counts ("products" in "five products") is mentioned in the verified text of
- * at least two record entries, and the count is no larger than the record can
+ * at least two record entries, and the count is no larger than the knowledge base can
  * add up to: the numbers it states for that thing, plus one for every line
- * that mentions it. "Led 60 engineers" over a record that mentions 3 and 15
+ * that mentions it. "Led 60 engineers" over a knowledge base that mentions 3 and 15
  * engineers is not a total.
  */
 export function composableTotal(token: CountToken, entryTexts: string[]): boolean {

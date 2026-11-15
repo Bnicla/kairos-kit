@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { askToSave, changedFields, diffPreview, fits, jsonDiff, newLines, removedLines, type Confirmer } from "../apps/local/lib/record-confirm";
+import { askToSave, bodyChanges, changedFields, diffPreview, fits, jsonDiff, markdownDiff, newLines, recordFileDiff, removedFields, removedLines, type Confirmer } from "../apps/local/lib/record-confirm";
 
 describe("record-confirm helpers", () => {
   const confirmer = (supports: boolean, action: "accept" | "decline" | "cancel", seen: string[] = []): Confirmer => ({
@@ -32,6 +32,37 @@ describe("record-confirm helpers", () => {
     const after = "- led the launch [R]\n- managed a team of 4 [C]\n";
     expect(removedLines(before, after)).toEqual(["- grew revenue 20% [R]"]);
     expect(diffPreview(newLines(before, after), removedLines(before, after))).toEqual(["New or changed:", "+ - managed a team of 4 [C]", "", "Removed:", "- - grew revenue 20% [R]"]);
+  });
+
+  it("a role saved again shows every change: a field that is dropped, a line that moves, a line that is repeated", () => {
+    const before = {
+      data: { company: "Ledgerly", start: "2025-06", end: "2025-09", skills: ["Python", "SQL"], sources: ["resume.pdf"] },
+      content: "\n## What I did\n- Shipped a reconciliation feature. [R]\n- Wrote tests for the data pipeline. [R]\n\n## Results\n- Used by 40 internal users. [R]\n",
+    };
+    // The same lines exist afterwards, so a comparison of which lines exist finds nothing.
+    const body = "\n## What I did\n- Shipped a reconciliation feature. [R]\n\n## Results\n- Used by 40 internal users. [R]\n- Wrote tests for the data pipeline. [R]\n- Used by 40 internal users. [R]\n";
+    expect(newLines(before.content, body)).toEqual([]);
+    expect(removedLines(before.content, body)).toEqual([]);
+    // The new frontmatter leaves out the skills and the end date.
+    const frontmatter = { company: "Ledgerly", start: "2025-06" };
+    expect(removedFields(before.data, frontmatter, ["sources"])).toEqual(["end: 2025-09", "skills: Python, SQL"]);
+    expect(recordFileDiff(before, frontmatter, body, ["sources"])).toEqual([
+      "New or changed:",
+      "+ - Used by 40 internal users. [R] (repeated: 2 times, 1 before)",
+      "",
+      "Removed:",
+      "- end: 2025-09",
+      "- skills: Python, SQL",
+      "",
+      "Moved to another section:",
+      '~ - Wrote tests for the data pipeline. [R] (from "What I did" to "Results")',
+    ]);
+    // A copy that goes, a line under no heading, and a file that does not change at all.
+    expect(bodyChanges("a\na\nb\n## H\nc", "a\n## H\nb\nc")).toEqual({ added: [], removed: ["a (1 of its 2 copies)"], moved: ['b (from the top of the file to "H")'] });
+    expect(markdownDiff(before.content, before.content)).toEqual([]);
+    expect(recordFileDiff(before, before.data, before.content)).toEqual([]);
+    // A new file shows all of it, as before.
+    expect(recordFileDiff(null, { company: "Ledgerly" }, "## What I did\n- One line. [R]")).toEqual(["New or changed:", "+ company: Ledgerly", "+ ## What I did", "+ - One line. [R]"]);
   });
 
   it("jsonDiff lists changed and removed values by path", () => {
@@ -62,7 +93,7 @@ describe("record-confirm helpers", () => {
 });
 
 // The real server over stdio, against a client that answers its confirmations.
-describe("Kairos MCP server: writes to the record need the user's approval", () => {
+describe("Kairos MCP server: writes to the knowledge base need the user's approval", () => {
   const home = mkdtempSync(join(tmpdir(), "kairos-confirm-"));
   afterAll(() => rmSync(home, { recursive: true, force: true }));
 

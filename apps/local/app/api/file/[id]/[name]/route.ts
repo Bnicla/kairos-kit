@@ -1,4 +1,4 @@
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { getStore } from "@/store";
 import { submissionFileName } from "@kairos/engine/file-names";
 

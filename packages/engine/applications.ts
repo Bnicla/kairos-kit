@@ -81,6 +81,8 @@ export interface IndexEntry {
   updated_at: string;
   applied_at?: string;
   score_band?: string;
+  /** Entries written before 2026-11-13 lack it; application-meta.json has it. */
+  score_confidence?: string;
   recommendation?: string;
   archived?: boolean;
   track?: string;
@@ -104,12 +106,45 @@ export function slugify(input: string): string {
     .slice(0, 60);
 }
 
+/** A short code of a text (cyrb53, in base 36): the same text gives the same code on every machine. Not a secret. */
+function shortCode(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36).padStart(7, "0").slice(-7);
+}
+
+/**
+ * One part of an application's id (the company, or the role). A name written in
+ * Latin letters and no longer than 60 characters gives what `slugify` gives, as
+ * it always did. Two cases get a code of the whole name after it, so that the
+ * part is never empty and two different names do not end as the same part:
+ * - the name has letters or digits that `slugify` drops (Chinese, Japanese,
+ *   Arabic, Cyrillic and other scripts);
+ * - the name is longer than the 60 characters `slugify` keeps.
+ */
+export function idPart(name: string): string {
+  const folded = name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const whole = folded.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = slugify(name);
+  const dropped = /[^\x00-\x7f]/.test(folded) && /[\p{L}\p{N}]/u.test(folded.replace(/[\x00-\x7f]/g, ""));
+  if (slug && !dropped && whole.length <= 60) return slug;
+  const code = shortCode(name.normalize("NFKC").trim().toLowerCase());
+  return slug ? `${slug.slice(0, 52).replace(/-+$/, "")}-${code}` : code;
+}
+
 export function applicationFolderName(
   company: string,
   role: string,
   date = new Date().toISOString().slice(0, 10),
 ): string {
-  return `${date}_${slugify(company)}_${slugify(role)}`;
+  return `${date}_${idPart(company)}_${idPart(role)}`;
 }
 
 // Index --------------------------------------------------------------------
@@ -156,10 +191,17 @@ export async function rebuildApplicationsIndex(
 // + a dashboard server action) would clobber each other's entry. Serialize all
 // index mutations through one in-process promise chain. (Cross-PROCESS races
 // remain possible but are rare; `rebuild` from folders is the recovery path.)
-let indexLock: Promise<unknown> = Promise.resolve();
-function withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = indexLock.then(fn, fn);
-  indexLock = run.catch(() => {});
+// One chain per data folder, so that one user's slow storage does not hold another user's writes
+// (the hosted connector serves several stores from one process). A local store is known by its
+// folder, since several store objects can stand for the same folder; any other store by itself.
+const indexLocksByRoot = new Map<string, Promise<unknown>>();
+const indexLocksByStore = new WeakMap<object, Promise<unknown>>();
+function withIndexLock<T>(store: Store, fn: () => Promise<T>): Promise<T> {
+  const root = (store as { root?: unknown }).root;
+  const locks: { get(k: never): Promise<unknown> | undefined; set(k: never, v: Promise<unknown>): unknown } = typeof root === "string" ? indexLocksByRoot : indexLocksByStore;
+  const key = (typeof root === "string" ? root : store) as never;
+  const run = (locks.get(key) ?? Promise.resolve()).then(fn, fn);
+  locks.set(key, run.catch(() => {}));
   return run;
 }
 
@@ -167,7 +209,7 @@ export function upsertIndexEntry(
   store: Store,
   entry: IndexEntry,
 ): Promise<void> {
-  return withIndexLock(async () => {
+  return withIndexLock(store, async () => {
     const idx = await loadIndex(store);
     const i = idx.applications.findIndex((a) => a.id === entry.id);
     if (i === -1) idx.applications.unshift(entry);
@@ -179,7 +221,7 @@ export function upsertIndexEntry(
 
 /** Drop an application from the index (after its folder is purged). */
 export function removeIndexEntry(store: Store, id: string): Promise<void> {
-  return withIndexLock(async () => {
+  return withIndexLock(store, async () => {
     const idx = await loadIndex(store);
     idx.applications = idx.applications.filter((a) => a.id !== id);
     await store.writeJson(INDEX_PATH, idx);
@@ -187,6 +229,25 @@ export function removeIndexEntry(store: Store, id: string): Promise<void> {
 }
 
 // Application CRUD ---------------------------------------------------------
+
+/**
+ * The id for a new application: the day, the company and the role. When an
+ * application already has that id, it is the same one only if its company, its
+ * role and its link are the same (the posting captured again, which replaces
+ * the capture as before). Any other application gets an id of its own, the
+ * same with -2, -3 and so on: one application never takes another's folder.
+ */
+async function freeApplicationId(store: Store, input: { company: string; role: string; source_url?: string }): Promise<string> {
+  const base = applicationFolderName(input.company, input.role);
+  const link = input.source_url?.trim() ?? "";
+  for (let n = 1; n <= 200; n++) {
+    const id = n === 1 ? base : `${base}-${n}`;
+    const there = await readMeta(store, id);
+    if (!there) return id;
+    if (there.company === input.company && there.role === input.role && (there.source_url ?? "") === link) return id;
+  }
+  throw new Error(`Too many applications share the id ${base}. Nothing was saved.`);
+}
 
 export async function createApplication(
   store: Store,
@@ -215,7 +276,7 @@ export async function createApplication(
     );
   }
   const now = new Date().toISOString();
-  const id = applicationFolderName(input.company, input.role);
+  const id = await freeApplicationId(store, input);
   const folder = [APPLICATIONS, id];
 
   // §26: capture the snapshot FIRST, before anything else can fail.
@@ -347,6 +408,7 @@ function toIndexEntry(meta: ApplicationMeta): IndexEntry {
     updated_at: meta.updated_at,
     applied_at: meta.applied_at,
     score_band: meta.score_band,
+    score_confidence: meta.score_confidence,
     recommendation: meta.recommendation,
     archived: meta.archived,
     ...(meta.track ? { track: meta.track } : {}),

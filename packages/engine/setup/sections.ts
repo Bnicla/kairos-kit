@@ -236,6 +236,11 @@ export const SETTINGS: Record<string, SettingInfo & { asked?: false }> = {
   "profile.standing_base_app": { file: "profile.md", effect: "Base résumé for tailor-resume when a spec names none.", default: "None until the first tailored résumé; tailor-resume asks for spec.base.", asked: false },
   "profile.resume_leadin_aliases": { file: "profile.md", effect: "Maps renamed bullet lead-ins so old tailoring specs keep matching.", default: "{} (nothing renamed yet).", asked: false },
   "profile.stories_map": { file: "profile.md", effect: "Data-folder path of the stories map the deep-dives page reads.", default: "knowledge-base/stories-map.json.", asked: false },
+  "profile.referrals": { file: "profile.md", effect: "Container for the settings below: which applications show the user's contacts at the company as possible referrals.", default: "Defaults below.", asked: false },
+  "profile.referrals.enabled": { file: "profile.md", effect: "false: contacts are never shown unasked (the user can still ask for them).", default: "true.", asked: false },
+  "profile.referrals.min_band": { file: "profile.md", effect: "Lowest score band at which contacts at the company are shown (STRONG, COMPETITIVE, DEVELOPING or WEAK).", default: "COMPETITIVE.", asked: false },
+  "profile.referrals.min_confidence": { file: "profile.md", effect: "Lowest score confidence at which contacts at the company are shown (high, medium or low).", default: "high.", asked: false },
+  "profile.referrals.after_applying": { file: "profile.md", effect: "true: contacts stay shown after the application is sent (applied, interviewing, offer, on hold).", default: "false: shown only while the application is not sent yet.", asked: false },
   "profile.voice": { file: "profile.md", effect: "Container for the voice settings below.", default: "Built-in banned phrase list only." },
   "profile.voice.banned_patterns": { file: "profile.md", effect: "Letter and answer prose check.", default: "Built-in phrase list only." },
   "profile.voice.replace_default_patterns": { file: "profile.md", effect: "true: the user's list replaces the built-in one.", default: "false (the user's list extends the built-in one)." },
@@ -275,20 +280,20 @@ export const SETTINGS: Record<string, SettingInfo & { asked?: false }> = {
   "autofill.links": { file: "autofill.json", effect: "Form autofill: LinkedIn, GitHub, portfolio.", default: "Left blank on forms." },
   "autofill.work_authorization": { file: "autofill.json", effect: "Form autofill: authorization and sponsorship questions.", default: "Left blank on forms." },
   "autofill.address": { file: "autofill.json", effect: "Form autofill: address fields.", default: "Left blank on forms." },
-  "autofill.common_answers": { file: "autofill.json", effect: "Form autofill: standard answers (start date, how they heard, current employer, school).", default: "Employer and school from the record; the rest blank." },
+  "autofill.common_answers": { file: "autofill.json", effect: "Form autofill: standard answers (start date, how they heard, current employer, school).", default: "Employer and school from the knowledge base; the rest blank." },
   "autofill.eeo": { file: "autofill.json", effect: "Form autofill: demographic questions, only when share_eeo is true.", default: "Never filled." },
   "autofill.share_eeo": { file: "autofill.json", effect: "Opt-in for serving the EEO answers.", default: "false." },
   "autofill.defaults": { file: "autofill.json", effect: "Extension behaviour flags.", default: "{ never_auto_submit: true }." },
-  "autofill.work_history_overrides": { file: "autofill.json", effect: "How each record role appears on application forms: HR title, exact months, ended or current, or left off.", default: "The record's title and years, as on the résumé." },
+  "autofill.work_history_overrides": { file: "autofill.json", effect: "How each knowledge base role appears on application forms: HR title, exact months, ended or current, or left off.", default: "The knowledge base's title and years, as on the résumé." },
 
   // --- knowledge base -------------------------------------------------------
   "kb.education": { file: "knowledge-base/education/*.md", effect: "Résumé education section; scoring.", default: "No education section." },
   "kb.experiences": { file: "knowledge-base/experiences/*.md", effect: "Everything: scoring, résumés, letters, prep.", default: "None: scoring and tailoring refuse to run." },
   "kb.skills": { file: "knowledge-base/experiences/*.md (skills in frontmatter)", effect: "Scoring and résumé skills line.", default: "Skills found in the documents." },
-  "kb.metrics_register": { file: "knowledge-base/metrics-register.md", effect: "Which numbers may appear in documents (DEFENDED and SCOPE only).", default: "Empty: numbers stay as tagged in the record." },
+  "kb.metrics_register": { file: "knowledge-base/metrics-register.md", effect: "Which numbers may appear in documents (DEFENDED and SCOPE only).", default: "Empty: numbers stay as tagged in the knowledge base." },
   "kb.voice_profile": { file: "knowledge-base/_voice-profile.md", effect: "Résumé and letter style.", default: "Learned from the résumé." },
   "kb.writing_samples": { file: "knowledge-base/_writing-samples.md", effect: "Cover-letter style few-shots.", default: "None: letters follow the house style only." },
-  "kb.star_stories": { file: "knowledge-base/star-stories.json", effect: "Dashboard Stories page; interview prep.", default: "Built later by /prep from the record.", asked: false },
+  "kb.star_stories": { file: "knowledge-base/star-stories.json", effect: "Dashboard Stories page; interview prep.", default: "Built later by /prep from the knowledge base.", asked: false },
 };
 
 /**
@@ -333,6 +338,7 @@ export const PROFILE_SETTINGS_FIELDS: Record<keyof ProfileSettings, true> = {
   metrics_allowed_statuses: true,
   voice: true,
   stories_map: true,
+  referrals: true,
 };
 
 export function sectionByName(name: string): SetupSection | undefined {

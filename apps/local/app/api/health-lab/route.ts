@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getStore } from "@/store";

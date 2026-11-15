@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getStore } from "@/store";
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { loadEducation, loadExperiences } from "@kairos/engine/kb/store";
 import { loadIndex } from "@kairos/engine/applications";
 import { submissionFileName } from "@kairos/engine/file-names";
@@ -22,13 +22,13 @@ export interface AutofillJson {
   share_eeo?: boolean;
   common_answers?: Record<string, string>;
   defaults?: Record<string, unknown>;
-  /** How each record role appears on application forms, keyed by experience id (see WorkHistoryOverride). */
+  /** How each knowledge base role appears on application forms, keyed by experience id (see WorkHistoryOverride). */
   work_history_overrides?: Record<string, WorkHistoryOverride>;
 }
 
 /**
- * The user's own decisions about how one record role appears on application
- * forms, where a form needs something the record does not hold or the user
+ * The user's own decisions about how one knowledge base role appears on application
+ * forms, where a form needs something the knowledge base does not hold or the user
  * shows differently on forms (an HR title, exact months, a role left off).
  * Dates are "MM/YYYY" or "YYYY".
  */
@@ -49,14 +49,14 @@ export interface WorkHistoryRow {
   start: string;
   end: string;
   current: boolean;
-  /** Which fields came from work_history_overrides rather than the record. */
+  /** Which fields came from work_history_overrides rather than the knowledge base. */
   overridden?: string[];
 }
 
 /**
- * Apply work_history_overrides to the record's roles: excluded roles drop out,
- * other fields replace the record's value and are listed in `overridden`. An
- * override for an id the record does not hold is ignored (it never adds a role).
+ * Apply work_history_overrides to the knowledge base's roles: excluded roles drop out,
+ * other fields replace the knowledge base's value and are listed in `overridden`. An
+ * override for an id the knowledge base does not hold is ignored (it never adds a role).
  */
 export function applyWorkHistoryOverrides(rows: WorkHistoryRow[], overrides: Record<string, WorkHistoryOverride> | undefined): WorkHistoryRow[] {
   if (!overrides) return rows;
@@ -186,7 +186,8 @@ export async function rejectUnauthorized(
   return null;
 }
 
-type Store = ReturnType<typeof getStore>;
+// The engine's store interface: the local data folder, or a user's own store under the hosted connector.
+type Store = import("@kairos/engine/store/types").Store;
 
 /**
  * Assemble the normalized autofill profile from ~/Kairos. Shared so the profile

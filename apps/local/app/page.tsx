@@ -5,6 +5,8 @@ import { archiveAction } from "@/app/actions";
 import { STATUS_META } from "@kairos/engine/applications";
 import ThemeToggle from "@/components/ThemeToggle";
 import PipelineBoard from "@/components/PipelineBoard";
+import Byline from "@/components/Byline";
+import { CHIEF_OF_STAFF_LINE } from "@kairos/engine/staff";
 
 export const dynamic = "force-dynamic"; // always read the latest files
 
@@ -44,7 +46,7 @@ export default async function Dashboard({
       {/* Knowledge base summary */}
       <section className="card mb-6 p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold">Knowledge base</h2>
+          <h2 className="font-semibold">Knowledge base<Byline name="Biographer" /></h2>
           <div className="flex items-center gap-3 text-xs">
             <Link href="/stories" className="text-accent hover:underline">
               STAR stories
@@ -126,7 +128,8 @@ export default async function Dashboard({
         {applications.length === 0 ? (
           <div className="card text-muted p-8 text-center text-sm">
             No applications yet. In Claude Code, run <code>/score</code> with a job link to score a posting. If your
-            record is not built yet, run <code>/setup</code> first.
+            knowledge base is not built yet, run <code>/setup</code> first.
+            <span className="mt-2 block">{CHIEF_OF_STAFF_LINE}</span>
           </div>
         ) : (
           <PipelineBoard applications={applications} sourced={sourcedCards} sourcedTotal={allSourced.length} sourcedRanAt={sourcedRun?.ran_at} />

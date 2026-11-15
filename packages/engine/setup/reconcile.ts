@@ -1,13 +1,13 @@
 /**
  * Compare what several documents say (a résumé, a LinkedIn export, a
- * transcript, interview answers) with each other and with the record already
+ * transcript, interview answers) with each other and with the knowledge base already
  * on file, before anything is saved.
  *
  * The output keeps three things apart:
  *   - conflicts: two sources disagree on a title, a date or a name. Each one
  *     becomes a numbered question; nothing in that role is saved until the
  *     user answers.
- *   - additive: the record already has the role and a new source only adds
+ *   - additive: the knowledge base already has the role and a new source only adds
  *     to it (a more precise date, a location, a new source). Shown as a list
  *     the user approves once.
  *   - new: the role is not on file yet.
@@ -21,7 +21,7 @@ export interface SourceRole {
   start?: string;
   end?: string;
   location?: string;
-  /** The record file, for entries that come from the record itself. */
+  /** The knowledge base file, for entries that come from the knowledge base itself. */
   fileName?: string;
 }
 
@@ -71,7 +71,7 @@ export interface ReconciledItem<T> {
   /** Best value per field from agreeing sources (conflicting fields omitted). */
   merged: Partial<T>;
   sources: string[];
-  /** Sources not yet listed on the record file. */
+  /** Sources not yet listed on the knowledge base file. */
   new_sources: string[];
   additions: Addition[];
   questions: number[];
@@ -85,7 +85,7 @@ export interface Reconciliation {
   summary: { new: number; additive: number; conflict: number; unchanged: number; questions: number };
 }
 
-const RECORD = "record on file";
+const RECORD = "knowledge base on file";
 
 // --- normalization -----------------------------------------------------------
 

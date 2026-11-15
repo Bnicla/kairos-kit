@@ -22,6 +22,8 @@ jobs:
           KIT_SCAN_PATTERNS: ${{ secrets.KIT_SCAN_PATTERNS }}
         run: node scripts/privacy-scan.mjs
       - run: npm ci
+      - name: Dependency audit (advisories of high or critical severity)
+        run: npm audit --omit=dev --audit-level=high
       - name: Typecheck
         run: npm run typecheck
       - name: Tests

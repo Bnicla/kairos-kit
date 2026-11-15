@@ -4,6 +4,8 @@
  * tagged `[R]` (from-uploaded-resume). Nothing is invented; if a detail isn't in
  * the resume text, it is not added.
  */
+import { worded } from "@kairos/engine/wording";
+
 export const EXTRACTION_SYSTEM_PROMPT = `You extract a structured career knowledge base from the plain text of a candidate's uploaded resume, for an authenticity-preserving career tool. You NEVER invent facts. Every fact you output must be literally present in, or directly stated by, the resume text. If something is not in the text, do not add it.
 
 WHAT COUNTS AS AN EXPERIENCE. Not only employment. For early-career candidates (students, recent graduates, career changers) the real evidence often lives elsewhere; treat each of these as a first-class experience entry when it has substance:
@@ -25,7 +27,7 @@ Output valid JSON matching the OUTPUT CONTRACT exactly. No prose outside JSON.`;
 
 export function buildExtractionUserMessage(resumeText: string): string {
   return [
-    "Extract the knowledge base from this resume text. Number experiences reverse-chronologically (01 = most recent). Return ONLY JSON.",
+    worded`Extract the knowledge base from this resume text. Number experiences reverse-chronologically (01 = most recent). Return ONLY JSON.`,
     "",
     "RESUME TEXT:",
     "```",

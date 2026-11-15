@@ -19,6 +19,7 @@ import {
   readLineOrigins,
   summarizeOrigins,
 } from "@kairos/engine/line-origin";
+import { FACT_MAX, ORIGIN_CHIP, cutFact, educationLabel, factParts, loadLineOriginView, originCounts, originGroups, plainLine, type LineOriginView } from "@kairos/engine/line-origin-view";
 import { contentStems, summarySentences } from "@kairos/engine/stretch";
 import { auditSourceExperiences, COVERAGE_TOKEN_OVERLAP } from "@kairos/engine/tools/checks";
 import { saveGeneratedResume } from "@kairos/engine/tools/ops";
@@ -26,7 +27,7 @@ import type { GeneratedResume, LineOrigin } from "@kairos/engine/types";
 
 /**
  * Line origins: every bullet, role intro and summary sentence of a résumé is
- * traced in code to the verified fact or facts of the record it comes from.
+ * traced in code to the verified fact or facts of the knowledge base it comes from.
  * All fixtures are fictional.
  */
 
@@ -107,7 +108,7 @@ describe("the verified facts of an entry", () => {
 });
 
 describe("the origin of a line", () => {
-  it("gives a line copied from the record its own fact, tag included, with the id of the entry", () => {
+  it("gives a line copied from the knowledge base its own fact, tag included, with the id of the entry", () => {
     const o = bulletOrigin("Wrote the carrier onboarding checklist and ran weekly office hours for 60 carriers.");
     expect(o).toEqual({
       kind: "bullet",
@@ -140,7 +141,7 @@ describe("the origin of a line", () => {
     expect(o.facts[0]!.fact).toBe(REBUILT);
   });
 
-  it("is partial when one fact holds part of the line and the rest is not in the record", () => {
+  it("is partial when one fact holds part of the line and the rest is not in the knowledge base", () => {
     const o = bulletOrigin("Rebuilt the dispatch console for planners and negotiated fuel surcharge terms with brokers.");
     expect(o.strength).toBe("partial");
     expect(o.overlap).toBeGreaterThanOrEqual(ORIGIN_PARTIAL);
@@ -148,17 +149,17 @@ describe("the origin of a line", () => {
     expect(o.facts).toEqual([{ experience_id: "harborline-pm", fact: REBUILT }]);
   });
 
-  it("finds nothing for a line the record does not hold", () => {
+  it("finds nothing for a line the knowledge base does not hold", () => {
     expect(bulletOrigin("Launched a loyalty programme for retail shoppers in three countries.")).toMatchObject({ strength: "none", facts: [] });
   });
 
   it("does not take a number and one common word for an origin", () => {
-    // "60 carriers" is in the record; the line is about something else.
+    // "60 carriers" is in the knowledge base; the line is about something else.
     expect(bulletOrigin("Signed 60 carriers to the premium insurance plan.").strength).toBe("none");
   });
 
-  it("does not take the vocabulary of the record for an origin: the words must also follow a fact", () => {
-    // Every word is in the Harborline facts, from three of them, and no two stand together as the record writes them.
+  it("does not take the vocabulary of the knowledge base for an origin: the words must also follow a fact", () => {
+    // Every word is in the Harborline facts, from three of them, and no two stand together as the knowledge base writes them.
     const jumble = "Screen roadmap for carriers, console checklist with dispatchers, onboarding planners.";
     expect(bulletOrigin(jumble)).toMatchObject({ strength: "none", overlap: 1, facts: [] });
     // A summary sentence is a composition across facts: the same words there are partial, with the lines that support them.
@@ -214,7 +215,7 @@ describe("the source a provenance entry names", () => {
     expect(ids("Harborline Freight Product Manager")).toEqual(["harborline-pm"]);
   });
 
-  it("gives no entry for the profile or the education record, and null for a name the record does not hold", () => {
+  it("gives no entry for the profile or the education record, and null for a name the knowledge base does not hold", () => {
     expect(auditSourceExperiences("profile", exps)).toEqual([]);
     expect(auditSourceExperiences("Education: B.A. Economics", exps)).toEqual([]);
     expect(auditSourceExperiences("Quorvex Labs", exps)).toBeNull();
@@ -225,13 +226,13 @@ describe("the origin check", () => {
   it("lists a line with no origin, under rule origin, with its employer", () => {
     const report = checkLineOrigins(resume({ summary: "Known for calm under pressure.", bullets: ["Launched a loyalty programme for retail shoppers in three countries."] }), exps);
     expect(report.findings).toEqual([
-      { rule: "origin", kind: "none", company: "Executive summary", line: "Known for calm under pressure.", detail: "no verified fact of the record was found for this sentence" },
+      { rule: "origin", kind: "none", company: "Executive summary", line: "Known for calm under pressure.", detail: "no verified fact of the knowledge base was found for this sentence" },
       {
         rule: "origin",
         kind: "none",
         company: "Harborline Freight",
         line: "Launched a loyalty programme for retail shoppers in three countries.",
-        detail: "no verified fact of the Harborline Freight record was found for this line",
+        detail: "no verified fact under Harborline Freight in the knowledge base was found for this line",
       },
     ]);
     expect(report.counts).toEqual({ strong: 0, partial: 0, none: 2 });
@@ -389,8 +390,207 @@ describe("the application page section", () => {
     const long = `${"Kept the dispatch console running through the winter storms. ".repeat(12)}[C]`;
     const line: LineOrigin = { kind: "bullet", role: 0, bullet: 0, text: "Kept the console running.", strength: "partial", overlap: 0.5, facts: [{ experience_id: "harborline-pm", fact: long }] };
     const out = renderToStaticMarkup(createElement(LineOrigins, { view: { saved: false, roles: view.roles, lines: [line] } }));
-    expect(out).toContain("computed now, from your record as it is today");
+    expect(out).toContain("computed now, from your knowledge base as it is today");
     expect(out).toContain(`title="${long}"`);
     expect(out).toContain('… <span class="prov-C font-semibold">[C]</span>');
+  });
+});
+
+describe("the line origins view, shared by the dashboard and the connector's application page", () => {
+  const lines: LineOrigin[] = [
+    { kind: "bullet", role: 1, bullet: 0, text: "**Scheduling app:** Led a team of 4.", strength: "strong", overlap: 1, facts: [{ experience_id: "capstone", fact: "Led a team of 4 building a scheduling app for students. [R]" }] },
+    { kind: "summary", sentence: 0, text: "Intern who shipped a feature.", strength: "partial", overlap: 0.5, facts: [] },
+    { kind: "role_intro", role: 0, text: "Summer internship.", strength: "strong", overlap: 1, facts: [] },
+    { kind: "bullet", role: 0, bullet: 0, text: "Mentored two students.", strength: "none", overlap: 0, facts: [] },
+  ];
+  const view: LineOriginView = { saved: true, lines, roles: ["Ledgerly · Intern", "State University · Lead", "A role with no line"] };
+
+  it("groups the lines as the résumé has them, counts them and names each strength", () => {
+    expect(originGroups(view).map((g) => [g.label, g.lines.map((l) => l.kind)])).toEqual([
+      ["Executive summary", ["summary"]],
+      ["Ledgerly · Intern", ["role_intro", "bullet"]],
+      ["State University · Lead", ["bullet"]],
+    ]);
+    expect(originCounts(lines)).toEqual({ strong: 2, partial: 1, none: 1 });
+    expect(ORIGIN_CHIP).toEqual({ strong: { tone: "success", label: "Strong" }, partial: { tone: "info", label: "Partial" }, none: { tone: "warn", label: "None" } });
+    expect(plainLine(lines[0].text)).toBe("Scheduling app: Led a team of 4.");
+  });
+
+  it("cuts a long fact and keeps its provenance tag, and splits a fact at its tags", () => {
+    const long = `${"Built the nightly job. ".repeat(30)}[C]`;
+    const cut = cutFact(long);
+    expect(cut.length).toBeLessThanOrEqual(FACT_MAX + 6);
+    expect(cut.endsWith("… [C]")).toBe(true);
+    expect(cutFact("Short fact. [R]")).toBe("Short fact. [R]");
+    expect(factParts("First part [R] and a second [F]")).toEqual([{ text: "First part " }, { text: "[R]", tag: "R" }, { text: " and a second " }, { text: "[F]", tag: "F" }]);
+    expect(factParts("No tag here")).toEqual([{ text: "No tag here" }]);
+  });
+
+  it("reads the origins a save recorded, computes them for an older résumé, and shows nothing for a file it cannot read", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kairos-origin-view-"));
+    const store = new LocalStore(dir);
+    await store.writeFile(["profile.md"], "---\nname: Jordan Example\n---\n");
+    await store.writeFile(["knowledge-base", "experiences", "01-intern.md"], "---\nid: intern\ncompany: Ledgerly\ntitle: Intern\nstart: '2025'\nend: '2025'\n---\n\n## Achievements\n- Wrote tests for the data pipeline. [R]\n");
+    const gen = { resume: { header: { name: "Jordan Example", contact: "" }, executive_summary: "", experience: [{ company: "Ledgerly", title: "Intern", dates: "2025", bullets: ["Wrote tests for the data pipeline."] }], education: [], skills: [] }, provenance_audit: [] } as GeneratedResume;
+    // Saved before origins were recorded: computed now, from the knowledge base.
+    const computed = (await loadLineOriginView(store, gen))!;
+    expect(computed).toMatchObject({ saved: false, roles: ["Ledgerly · Intern"] });
+    expect(computed.lines).toMatchObject([{ kind: "bullet", strength: "strong", facts: [{ fact: "Wrote tests for the data pipeline. [R]" }] }]);
+    // Saved with its origins: those are shown as they are, whatever the knowledge base says today.
+    const saved = (await loadLineOriginView(store, { ...gen, line_origins: [{ kind: "bullet", role: 0, bullet: 0, text: "Wrote tests.", strength: "partial", overlap: 0.5, facts: [] }] }))!;
+    expect(saved).toMatchObject({ saved: true, lines: [{ strength: "partial" }] });
+    // No résumé, a résumé with no roles, and origins that are all malformed: no section.
+    expect(await loadLineOriginView(store, null)).toBeNull();
+    expect(await loadLineOriginView(store, { fictional: true } as never)).toBeNull();
+    expect(await loadLineOriginView(store, { ...gen, line_origins: [{ kind: "nonsense" }] as never })).toBeNull();
+  });
+});
+
+describe("a summary as its sentences: abbreviations, numbers and list marks", () => {
+  it("does not cut a sentence at an abbreviation, an initial or a number, and still cuts where a sentence ends", () => {
+    const one = (text: string) => expect(summarySentences(text), text).toEqual([text]);
+    const cut = (text: string, parts: string[]) => expect(summarySentences(text), text).toEqual(parts);
+    // The sentence goes on after the abbreviation.
+    one("B.S. Computer Science at State University, expected May 2027, GPA 3.6.");
+    one("M.B.A. Candidate at State University with a B.A. Economics.");
+    one("Ph.D. Candidate in statistics after an M.S. Statistics in 2024.");
+    one("Worked across the U.S. Army logistics programme for two years.");
+    one("Interned at Ledgerly Inc. Software team for one summer.");
+    one("Mentored by Dr. Okafor and Prof. Lindqvist of St. Olaf College.");
+    one("Compared React vs. Flutter and ranked No. 2 of 40 teams.");
+    one("Assistant to J. K. Okafor on the scheduling study.");
+    one("Tools used daily, e.g. Python and SQL, i.e. Whatever the pipeline needed.");
+    // A number's own full stop is never a cut; the one that ends the sentence is.
+    cut("Graduated with a GPA of 3.6. Dean's List in 2025.", ["Graduated with a GPA of 3.6.", "Dean's List in 2025."]);
+    cut("Raised $1.5M in seed funding. Hired a team of 4.", ["Raised $1.5M in seed funding.", "Hired a team of 4."]);
+    cut("Shipped version 2.0. Users doubled within a month.", ["Shipped version 2.0.", "Users doubled within a month."]);
+    // After an abbreviation that can close a sentence, a word that starts one cuts.
+    cut("Based in the U.S. Led a team of 4.", ["Based in the U.S.", "Led a team of 4."]);
+    cut("Interned at Ledgerly Inc. Built a dashboard the ops team uses daily.", ["Interned at Ledgerly Inc.", "Built a dashboard the ops team uses daily."]);
+    cut("Finished Plan B. The team shipped on time.", ["Finished Plan B.", "The team shipped on time."]);
+    cut("Assistant to J. K. Okafor. Presented to a faculty panel.", ["Assistant to J. K. Okafor.", "Presented to a faculty panel."]);
+    // A single letter is an initial only when it is a word by itself. A token that holds a digit or a sign is no
+    // abbreviation: its full stop ends the sentence when a capital follows, whatever the next word is (a name, a noun).
+    cut("Led pricing for the product line until revenue reached €15M. MBA from State University and guest lecturer on pricing.", ["Led pricing for the product line until revenue reached €15M.", "MBA from State University and guest lecturer on pricing."]);
+    cut("Grew the seed round to $2M. Stanford MBA in 2024.", ["Grew the seed round to $2M.", "Stanford MBA in 2024."]);
+    cut("Cut churn by 40%. Northwind hired the team a year later.", ["Cut churn by 40%.", "Northwind hired the team a year later."]);
+    cut("Shipped the console in Q3. Acme then adopted it.", ["Shipped the console in Q3.", "Acme then adopted it."]);
+    cut("Valued at $2B. Northwind led the round.", ["Valued at $2B.", "Northwind led the round."]);
+    cut("Reached 50k. Northwind followed.", ["Reached 50k.", "Northwind followed."]);
+    cut("Graduated with a GPA of 3.6. Northwind hired her in 2024. Acme followed.", ["Graduated with a GPA of 3.6.", "Northwind hired her in 2024.", "Acme followed."]);
+    cut("Ranked 1st. Northwind sponsored the prize.", ["Ranked 1st.", "Northwind sponsored the prize."]);
+    cut("Managed the account of AT&T. Northwind came next.", ["Managed the account of AT&T.", "Northwind came next."]);
+    cut("Moved from sales to R&D. Northwind funded the lab.", ["Moved from sales to R&D.", "Northwind funded the lab."]);
+    // A unit in small letters is not a title; a product's name with a full stop in it is not a dotted abbreviation.
+    cut("Brought the response time to 40 ms. Northwind adopted the service.", ["Brought the response time to 40 ms.", "Northwind adopted the service."]);
+    cut("Rewrote the service in Node.js. Northwind adopted it.", ["Rewrote the service in Node.js.", "Northwind adopted it."]);
+    one("Reported to Ms. Okafor of Northwind for two years.");
+    // What the rule cannot tell apart, and keeps as one sentence: after an initial, a dotted abbreviation or "Inc.",
+    // a name can be the rest of the sentence ("J. Okafor", "U.S. Army", "Inc. Software team") or the start of the next.
+    one("Finished Plan B. Northwind shipped on time.");
+    one("Moved to the U.S. Northwind hired her.");
+    one("Interned at Ledgerly Inc. Northwind hired her.");
+    // Ordinary sentences, questions and line breaks cut as before.
+    cut("Product manager for the dispatch console. Known for calm under pressure.", ["Product manager for the dispatch console.", "Known for calm under pressure."]);
+    cut("Is this the right role? Yes. It matches the knowledge base!", ["Is this the right role?", "Yes.", "It matches the knowledge base!"]);
+    cut("First line\nSecond line. **Third:** sentence.", ["First line", "Second line.", "**Third:** sentence."]);
+  });
+
+  it("reads a summary written as a list without its list marks", () => {
+    const summary = ["- **Computer Science Student:** B.S. Computer Science at State University, expected May 2027, GPA 3.6.", "* **Intern:** Built a dashboard. Wrote tests.", "• Third line", "1. Numbered line", "2) Another one", "– Dashed line", "**Bold start:** stays", "3 years on the dispatch console", "-5% churn in a quarter"].join("\n");
+    expect(summarySentences(summary)).toEqual([
+      "**Computer Science Student:** B.S. Computer Science at State University, expected May 2027, GPA 3.6.",
+      "**Intern:** Built a dashboard.",
+      "Wrote tests.",
+      "Third line",
+      "Numbered line",
+      "Another one",
+      "Dashed line",
+      "**Bold start:** stays",
+      "3 years on the dispatch console",
+      "-5% churn in a quarter",
+    ]);
+    // The lines of the view carry no mark either.
+    const lines = computeLineOrigins(resume({ summary: "- Product manager for the dispatch console used by regional carriers.\n- Interviewed 22 dispatchers and turned the findings into the routing roadmap." }), exps).filter((l) => l.kind === "summary");
+    expect(lines.map((l) => [l.text, l.strength])).toEqual([
+      ["Product manager for the dispatch console used by regional carriers.", "strong"],
+      ["Interviewed 22 dispatchers and turned the findings into the routing roadmap.", "strong"],
+    ]);
+  });
+});
+
+describe("education entries among the facts of a summary sentence", () => {
+  const education = [
+    "---\ninstitution: State University\ncredential: B.S. Computer Science\ndates: expected May 2027\nsources: [resume.pdf]\n---\n\n## Notes\n- GPA 3.6. [R]\n- Dean's List in 2025.\n- Thesis on tide tables for small harbours. [?]\n",
+  ];
+  const degree = "- **Computer Science Student:** B.S. Computer Science at State University, expected May 2027, GPA 3.6.";
+  const summaryOf = (summary: string, opts: { education?: string[] } = {}) => computeLineOrigins(resume({ summary }), exps, opts).filter((l) => l.kind === "summary");
+
+  it("a sentence that states the degree finds the education entry, named as its source", () => {
+    // Before: the experiences hold nothing about the degree.
+    expect(summaryOf(degree).map((l) => l.strength)).toEqual(["none"]);
+    const [line] = summaryOf(degree, { education });
+    expect(line).toMatchObject({ kind: "summary", sentence: 0, strength: "strong", text: "**Computer Science Student:** B.S. Computer Science at State University, expected May 2027, GPA 3.6." });
+    // The fact is the entry's frontmatter as one line, and it names the entry.
+    expect(line.facts).toEqual([{ experience_id: "education:state-university", fact: "State University, B.S. Computer Science, expected May 2027", education: "State University" }]);
+    // A sentence that also leans on a line of the entry's body gets both.
+    expect(summaryOf("Graduating in May 2027 with a GPA of 3.6 in Computer Science.", { education })[0]).toMatchObject({
+      strength: "strong",
+      facts: [
+        { fact: "State University, B.S. Computer Science, expected May 2027", education: "State University" },
+        { fact: "GPA 3.6. [R]", education: "State University" },
+      ],
+    });
+    expect(educationLabel(line.facts[0])).toBe("Education · State University: ");
+    expect(educationLabel({})).toBe("");
+    // An untagged line of the education entry counts (the save already accepts the file as a source); a [?] line does not.
+    expect(summaryOf("Dean's List in 2025.", { education })[0]).toMatchObject({ strength: "strong", facts: [{ fact: "Dean's List in 2025." }] });
+    expect(summaryOf("Wrote a thesis on tide tables for small harbours.", { education })[0]).toMatchObject({ strength: "none", facts: [] });
+  });
+
+  it("changes nothing else: no line is weaker, experience lines keep their facts, bullets are not matched to education", () => {
+    const summaries = [
+      "Product manager for the dispatch console used by regional carriers.",
+      "Product manager who rebuilt the dispatch console, cutting planning time by 35%, and built the weekly churn dashboard in SQL and Looker.",
+      "Interviewed 22 dispatchers and wrote the carrier onboarding checklist for 60 carriers.",
+      "Known for calm under pressure.",
+      "Analyst turned product manager with a B.S. Computer Science who rebuilt the dispatch console.",
+    ];
+    const rank = { none: 0, partial: 1, strong: 2 };
+    for (const summary of summaries) {
+      const before = summaryOf(summary);
+      const after = summaryOf(summary, { education });
+      expect(after).toHaveLength(before.length);
+      after.forEach((l, i) => {
+        expect(rank[l.strength], summary).toBeGreaterThanOrEqual(rank[before[i].strength]);
+        // The same facts as before, unless an education entry made the line stronger.
+        if (!l.facts.some((f) => f.education)) expect(l, summary).toEqual(before[i]);
+        else expect(rank[l.strength], summary).toBeGreaterThan(rank[before[i].strength]);
+      });
+    }
+    // A bullet or a role intro about the degree, under an employer: its own employer's facts only, as before.
+    const underRole = computeLineOrigins(resume({ intro: "B.S. Computer Science at State University.", bullets: ["B.S. Computer Science at State University, expected May 2027, GPA 3.6."] }), exps, { education });
+    expect(underRole.filter((l) => l.kind !== "summary").map((l) => [l.kind, l.strength, l.facts.length])).toEqual([["role_intro", "none", 0], ["bullet", "none", 0]]);
+    // With no education entry the result is what it was.
+    expect(computeLineOrigins(resume(), exps, { education: [] })).toEqual(computeLineOrigins(resume(), exps));
+  });
+
+  it("a save records the education fact, the view reads it for an older résumé, and the dashboard's component names the entry", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kairos-origin-education-"));
+    const store = new LocalStore(dir);
+    await store.writeFile(["profile.md"], "---\nname: Noor Haddad\n---\n");
+    await store.writeFile(["knowledge-base", "experiences", "01-harborline-pm.md"], HARBORLINE);
+    await store.writeFile(["knowledge-base", "education", "state-university.md"], education[0]);
+    const gen = resume({ summary: degree });
+    const view = (await loadLineOriginView(store, gen))!;
+    expect(view.saved).toBe(false);
+    expect(view.lines[0]).toMatchObject({ kind: "summary", strength: "strong", facts: [{ education: "State University" }] });
+    const html = renderToStaticMarkup(createElement(LineOrigins, { view }));
+    expect(html).toContain("Education · State University: ");
+    expect(html).toContain("State University, B.S. Computer Science, expected May 2027");
+    // The check a save runs gets the education entries too.
+    const report = checkLineOrigins(gen, exps, { candidateName: "Noor Haddad", education });
+    expect(report.findings.filter((f) => f.kind === "none" && f.company === "Executive summary")).toEqual([]);
+    expect(checkLineOrigins(gen, exps, { candidateName: "Noor Haddad" }).findings.filter((f) => f.kind === "none" && f.company === "Executive summary")).toHaveLength(1);
   });
 });

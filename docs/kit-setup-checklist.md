@@ -49,6 +49,11 @@ setting the engine reads has no section and no stated default.
 | `profile.standing_base_app` | profile.md | not asked | None until the first tailored résumé; tailor-resume asks for spec.base. | Base résumé for tailor-resume when a spec names none. |
 | `profile.resume_leadin_aliases` | profile.md | not asked | {} (nothing renamed yet). | Maps renamed bullet lead-ins so old tailoring specs keep matching. |
 | `profile.stories_map` | profile.md | not asked | knowledge-base/stories-map.json. | Data-folder path of the stories map the deep-dives page reads. |
+| `profile.referrals` | profile.md | not asked | Defaults below. | Container for the settings below: which applications show the user's contacts at the company as possible referrals. |
+| `profile.referrals.enabled` | profile.md | not asked | true. | false: contacts are never shown unasked (the user can still ask for them). |
+| `profile.referrals.min_band` | profile.md | not asked | COMPETITIVE. | Lowest score band at which contacts at the company are shown (STRONG, COMPETITIVE, DEVELOPING or WEAK). |
+| `profile.referrals.min_confidence` | profile.md | not asked | high. | Lowest score confidence at which contacts at the company are shown (high, medium or low). |
+| `profile.referrals.after_applying` | profile.md | not asked | false: shown only while the application is not sent yet. | true: contacts stay shown after the application is sent (applied, interviewing, offer, on hold). |
 | `profile.voice` | profile.md | not asked | Built-in banned phrase list only. | Container for the voice settings below. |
 | `profile.voice.banned_patterns` | profile.md | 11. voice | Built-in phrase list only. | Letter and answer prose check. |
 | `profile.voice.replace_default_patterns` | profile.md | 11. voice | false (the user's list extends the built-in one). | true: the user's list replaces the built-in one. |
@@ -84,15 +89,15 @@ setting the engine reads has no section and no stated default.
 | `autofill.links` | autofill.json | 1. identity | Left blank on forms. | Form autofill: LinkedIn, GitHub, portfolio. |
 | `autofill.work_authorization` | autofill.json | 1. identity | Left blank on forms. | Form autofill: authorization and sponsorship questions. |
 | `autofill.address` | autofill.json | 13. forms | Left blank on forms. | Form autofill: address fields. |
-| `autofill.common_answers` | autofill.json | 13. forms | Employer and school from the record; the rest blank. | Form autofill: standard answers (start date, how they heard, current employer, school). |
+| `autofill.common_answers` | autofill.json | 13. forms | Employer and school from the knowledge base; the rest blank. | Form autofill: standard answers (start date, how they heard, current employer, school). |
 | `autofill.eeo` | autofill.json | 13. forms | Never filled. | Form autofill: demographic questions, only when share_eeo is true. |
 | `autofill.share_eeo` | autofill.json | 13. forms | false. | Opt-in for serving the EEO answers. |
 | `autofill.defaults` | autofill.json | 13. forms | { never_auto_submit: true }. | Extension behaviour flags. |
-| `autofill.work_history_overrides` | autofill.json | 13. forms | The record's title and years, as on the résumé. | How each record role appears on application forms: HR title, exact months, ended or current, or left off. |
+| `autofill.work_history_overrides` | autofill.json | 13. forms | The knowledge base's title and years, as on the résumé. | How each knowledge base role appears on application forms: HR title, exact months, ended or current, or left off. |
 | `kb.education` | knowledge-base/education/*.md | 2. education | No education section. | Résumé education section; scoring. |
 | `kb.experiences` | knowledge-base/experiences/*.md | 3. experience | None: scoring and tailoring refuse to run. | Everything: scoring, résumés, letters, prep. |
 | `kb.skills` | knowledge-base/experiences/*.md (skills in frontmatter) | 4. skills | Skills found in the documents. | Scoring and résumé skills line. |
-| `kb.metrics_register` | knowledge-base/metrics-register.md | 3. experience | Empty: numbers stay as tagged in the record. | Which numbers may appear in documents (DEFENDED and SCOPE only). |
+| `kb.metrics_register` | knowledge-base/metrics-register.md | 3. experience | Empty: numbers stay as tagged in the knowledge base. | Which numbers may appear in documents (DEFENDED and SCOPE only). |
 | `kb.voice_profile` | knowledge-base/_voice-profile.md | 11. voice | Learned from the résumé. | Résumé and letter style. |
 | `kb.writing_samples` | knowledge-base/_writing-samples.md | 11. voice | None: letters follow the house style only. | Cover-letter style few-shots. |
-| `kb.star_stories` | knowledge-base/star-stories.json | not asked | Built later by /prep from the record. | Dashboard Stories page; interview prep. |
+| `kb.star_stories` | knowledge-base/star-stories.json | not asked | Built later by /prep from the knowledge base. | Dashboard Stories page; interview prep. |

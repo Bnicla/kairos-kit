@@ -2,7 +2,7 @@
   "name": "kairos-kit",
   "version": "0.1.0",
   "private": true,
-  "description": "Kairos Kit: a local career-operations system on Claude Code (record with sources, scoring, tailored résumés, board, daily job search).",
+  "description": "Kairos Kit: a local career-operations system on Claude Code (knowledge base with sources, scoring, tailored résumés, board, daily job search).",
   "workspaces": [
     "packages/*",
     "apps/*"

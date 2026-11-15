@@ -8,6 +8,7 @@
  */
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
+import { childEnv } from "./child-env";
 import path from "node:path";
 import { emptySetupState } from "@kairos/engine/setup/status";
 
@@ -53,7 +54,7 @@ export async function ensureDataFolder(home: string): Promise<{ home: string; ex
 
 function run(cmd: string, args: string[], cwd?: string): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(cmd, args, { cwd, timeout: 8000 }, (err, stdout) => resolve(err ? null : String(stdout).trim()));
+    execFile(cmd, args, { cwd, timeout: 8000, env: childEnv() }, (err, stdout) => resolve(err ? null : String(stdout).trim()));
   });
 }
 

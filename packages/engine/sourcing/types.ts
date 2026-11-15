@@ -21,6 +21,13 @@ export interface Posting {
   posted_at: string | null;
   /** Age in days at fetch time; null when posted_at is null. */
   age_days: number | null;
+  /**
+   * The day (YYYY-MM-DD) the posting's job board last answered the reading that listed it. Set where
+   * the postings come from a list read ahead of the search (the hosted connector's daily list, which
+   * keeps a board's rows for a few days when the board does not answer); absent where a run reads the
+   * boards itself, and the run's own date says the same.
+   */
+  board_read_on?: string;
 }
 
 export interface SearchProfile {

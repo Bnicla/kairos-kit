@@ -1,5 +1,5 @@
 import { checkStyle, isHardStyleViolation, type StyleViolation } from "@kairos/engine/tools/checks";
-import { compileBannedPatterns, type VoiceSettings } from "@kairos/engine/settings";
+import { compileBannedPatterns, skippedBannedPatterns, type VoiceSettings } from "@kairos/engine/settings";
 
 /**
  * Deterministic anti-slop gate for candidate-facing PROSE (cover letters,
@@ -27,6 +27,7 @@ export interface ProseViolation {
     | "jd-parroting"
     | "i-opener-run"
     | "slop-phrase"
+    | "banned-pattern-not-checked"
     | "contrastive-reframe"
     | "significance-tail"
     | "tricolon"
@@ -184,8 +185,16 @@ function checkStructure(text: string): ProseViolation[] {
   return out;
 }
 
-export function checkProse(text: string, opts: { jobText?: string; voice?: VoiceSettings } = {}): ProseViolation[] {
-  const out: ProseViolation[] = checkStructure(text);
+/**
+ * `kind: "message"` is for a short message to one person (a LinkedIn message
+ * to a contact): no letter header to check, a question is the point of the
+ * message, and the paragraph rules written for a page of prose (one-sentence
+ * paragraphs, a concrete noun in every paragraph) do not apply. Everything
+ * else is the same gate.
+ */
+export function checkProse(text: string, opts: { jobText?: string; voice?: VoiceSettings; kind?: "letter" | "message" } = {}): ProseViolation[] {
+  const message = opts.kind === "message";
+  const out: ProseViolation[] = message ? [] : checkStructure(text);
   // Style checks run on everything except the header/greeting/sign-off; if the
   // shape is broken, check the whole text so a misplaced body is never skipped.
   const body = out.length ? text : letterBody(text);
@@ -203,6 +212,8 @@ export function checkProse(text: string, opts: { jobText?: string; voice?: Voice
   for (const h of hits(STOCK_CLOSERS)) out.push({ rule: "stock-closer", detail: `"${h}": stock closing line`, hard: true });
   for (const h of hits(SYCOPHANCY)) out.push({ rule: "sycophancy", detail: `"${h}"`, hard: true });
   const userBanned = compileBannedPatterns(opts.voice?.banned_patterns);
+  for (const p of skippedBannedPatterns(opts.voice?.banned_patterns))
+    out.push({ rule: "banned-pattern-not-checked", detail: `"${p.slice(0, 60)}" is written as a regular expression; here only plain phrases are checked. Write it as the phrase itself.`, hard: false });
   const banned = opts.voice?.replace_default_patterns ? userBanned : [...SLOP_PHRASES, ...userBanned];
   for (const h of hits(banned)) out.push({ rule: "slop-phrase", detail: `"${h}"`, hard: true });
   for (const h of hits(CONTRASTIVE)) out.push({ rule: "contrastive-reframe", detail: `"${h.slice(0, 80)}"`, hard: true });
@@ -213,10 +224,13 @@ export function checkProse(text: string, opts: { jobText?: string; voice?: Voice
   const sentences = sentencesOf(letterBody(text));
   // Mic-drop one-liners ("The gate did say no."): very short declaratives used for rhythm.
   const shorts = sentences.filter((s) => s.split(/\s+/).length <= 5 && !/^(?:thanks|thank you)/i.test(s));
-  if (shorts.length > 1) out.push({ rule: "mic-drop", detail: `${shorts.length} punchline-length sentences: ${shorts.map((s) => `"${s}"`).join(", ")}`, hard: true });
+  if (shorts.length > 1) out.push({ rule: "mic-drop", detail: `${shorts.length} punchline-length sentences: ${shorts.map((s) => `"${s}"`).join(", ")}`, hard: !message });
   else if (shorts.length === 1) out.push({ rule: "mic-drop", detail: `"${shorts[0]}": check it carries information, not rhythm`, hard: false });
 
-  for (const s of sentences.filter((x) => x.endsWith("?"))) out.push({ rule: "rhetorical-question", detail: `"${s}"`, hard: true });
+  const questions = sentences.filter((x) => x.endsWith("?"));
+  if (!message) for (const s of questions) out.push({ rule: "rhetorical-question", detail: `"${s}"`, hard: true });
+  // A message asks one thing; a third question is padding.
+  else if (questions.length > 2) out.push({ rule: "rhetorical-question", detail: `${questions.length} questions in one message: ask one thing`, hard: false });
 
   // Three sentences in a row opening with "I" reads like a list of claims.
   let run = 0;
@@ -235,7 +249,7 @@ export function checkProse(text: string, opts: { jobText?: string; voice?: Voice
   const iShare = sentences.length ? sentences.filter((x) => /^I\b/.test(x)).length / sentences.length : 0;
   if (sentences.length >= 6 && iShare > 0.4) out.push({ rule: "i-opener-share", detail: `${Math.round(iShare * 100)}% of sentences open with "I"`, hard: false });
 
-  const paragraphs = body.split(/\n{2,}/).map((p) => p.trim()).filter((p) => p && !/^[-*•]\s/.test(p));
+  const paragraphs = message ? [] : body.split(/\n{2,}/).map((p) => p.trim()).filter((p) => p && !/^[-*•]\s/.test(p));
   const oneLiners = paragraphs.filter((p) => sentencesOf(p).length === 1 && !/:$/.test(p));
   if (oneLiners.length >= 2) out.push({ rule: "one-line-paragraphs", detail: `${oneLiners.length} one-sentence paragraphs`, hard: false });
 

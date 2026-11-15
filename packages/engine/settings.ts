@@ -10,11 +10,12 @@
  * Every reader here returns a safe default when the file or the field is
  * absent, so a new user with an empty data folder gets working behaviour.
  */
-import matter from "gray-matter";
+import matter from "./front-matter";
 import type { SearchProfile } from "./sourcing/types";
 import type { Paper } from "./docx-render";
 import { DEFAULT_ALLOWED_METRIC_STATUSES, METRIC_STATUSES, type MetricStatus } from "./metrics-register";
 import type { Store } from "./store/types";
+import type { MatchBand } from "./types";
 
 export interface VoiceSettings {
   /**
@@ -26,6 +27,27 @@ export interface VoiceSettings {
   /** When true, banned_patterns REPLACES the built-in phrase list instead of extending it. */
   replace_default_patterns?: boolean;
 }
+
+export type ScoreConfidence = "high" | "medium" | "low";
+
+/** When Kairos shows, by itself, the people the user knows at a company (contacts.ts). */
+export interface ReferralSettings {
+  /** false: never shown unasked. The user can still ask for the contacts at a company. */
+  enabled?: boolean;
+  /** Lowest score band that counts as a good match. Unset: COMPETITIVE. */
+  min_band?: MatchBand;
+  /** Lowest score confidence. Unset: high. */
+  min_confidence?: ScoreConfidence;
+  /**
+   * true: contacts stay shown after the application is sent (applied,
+   * interviewing, offer, on hold). Unset or false: they are shown only while
+   * the application is not sent yet (captured, scored, drafted).
+   */
+  after_applying?: boolean;
+}
+
+/** `ReferralSettings` with every default applied. */
+export type ReferralRule = Required<ReferralSettings>;
 
 export interface ProfileSettings {
   /** appId of the standing generic résumé that tailor-resume clones when a spec names no base. */
@@ -49,6 +71,8 @@ export interface ProfileSettings {
   voice?: VoiceSettings;
   /** Path, inside the data folder, of the stories map read by the deep-dives page. */
   stories_map?: string;
+  /** Which applications show the user's contacts at the company as possible referrals. */
+  referrals?: ReferralSettings;
 }
 
 /** Where the deep-dives page reads the stories map when profile.md sets no `stories_map`. */
@@ -107,7 +131,38 @@ export function readProfileSettings(profileRaw: string | null | undefined): Prof
   }
   const map = str(fm.stories_map);
   if (map) out.stories_map = map;
+  const ref = fm.referrals as Record<string, unknown> | undefined;
+  if (ref && typeof ref === "object" && !Array.isArray(ref)) {
+    const r: ReferralSettings = {};
+    if (typeof ref.enabled === "boolean") r.enabled = ref.enabled;
+    if (typeof ref.after_applying === "boolean") r.after_applying = ref.after_applying;
+    // A value that is not a band or a confidence is ignored: a typo must not widen or close the rule.
+    const band = str(ref.min_band)?.toUpperCase();
+    if (band && (MATCH_BANDS as readonly string[]).includes(band)) r.min_band = band as MatchBand;
+    const confidence = str(ref.min_confidence)?.toLowerCase();
+    if (confidence && (SCORE_CONFIDENCES as readonly string[]).includes(confidence)) r.min_confidence = confidence as ScoreConfidence;
+    out.referrals = r;
+  }
   return out;
+}
+
+const MATCH_BANDS = ["STRONG", "COMPETITIVE", "DEVELOPING", "WEAK"] as const satisfies readonly MatchBand[];
+const SCORE_CONFIDENCES = ["high", "medium", "low"] as const satisfies readonly ScoreConfidence[];
+
+/**
+ * The default rule for showing contacts unasked: the score says the user meets
+ * the core bar of the role (COMPETITIVE or STRONG) and says so with high
+ * confidence. Asking someone for a referral costs that person time, so the
+ * default waits for the applications the score is sure about. It also stops
+ * once the application is sent (the owner's decision of 13 November 2026): a
+ * referral is asked for before applying. `after_applying: true` keeps the
+ * contacts shown on sent applications.
+ */
+export const DEFAULT_REFERRAL_RULE: ReferralRule = { enabled: true, min_band: "COMPETITIVE", min_confidence: "high", after_applying: false };
+
+/** The referral rule of a profile, defaults applied. */
+export function referralRule(settings: Pick<ProfileSettings, "referrals">): ReferralRule {
+  return { ...DEFAULT_REFERRAL_RULE, ...(settings.referrals ?? {}) };
 }
 
 /**
@@ -139,6 +194,24 @@ export function allowedMetricStatuses(settings: Pick<ProfileSettings, "metrics_a
 }
 
 /**
+ * Whether a pattern the user wrote as a regular expression ("/x/i") is run.
+ * On the user's own machine it is. Where one process serves several users
+ * (the hosted connector) it is not: a pattern such as /(a+)+$/ against a long
+ * run of "a" never finishes, and every user's requests would wait behind it.
+ * There, only plain phrases are checked.
+ */
+let userRegexAllowed = true;
+export function allowUserRegex(allowed: boolean): void {
+  userRegexAllowed = allowed;
+}
+
+const USER_REGEX = /^\/(.+)\/([a-z]*)$/;
+/** The user's patterns that are written as regular expressions and are not run here. */
+export function skippedBannedPatterns(patterns: string[] | undefined): string[] {
+  return userRegexAllowed ? [] : (patterns ?? []).filter((p) => USER_REGEX.test(p));
+}
+
+/**
  * Turn the user's banned_patterns into regexes. "/x/i" is a regex; anything
  * else is a literal phrase, escaped, matched as whole words, case-insensitive.
  * An invalid regex is skipped rather than breaking every letter check.
@@ -146,7 +219,8 @@ export function allowedMetricStatuses(settings: Pick<ProfileSettings, "metrics_a
 export function compileBannedPatterns(patterns: string[] | undefined): RegExp[] {
   const out: RegExp[] = [];
   for (const p of patterns ?? []) {
-    const m = p.match(/^\/(.+)\/([a-z]*)$/);
+    const m = p.match(USER_REGEX);
+    if (m && !userRegexAllowed) continue;
     try {
       if (m) out.push(new RegExp(m[1], m[2].includes("i") ? m[2] : m[2] + "i"));
       else {

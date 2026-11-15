@@ -1,4 +1,5 @@
 import type { Experience } from "@kairos/engine/kb/types";
+import { worded } from "@kairos/engine/wording";
 import { careerStage, type CareerStage } from "@kairos/engine/length-policy";
 
 /**
@@ -199,7 +200,7 @@ export function computeHealth(
   dims.push({
     key: "tells", label: "Authentic voice (no AI tells)", group: "Authenticity",
     score: aScore, status: band(aScore),
-    detail: `${emDashes} em dash(es), ${buzz} buzzword(s) across the knowledge base.`,
+    detail: worded`${emDashes} em dash(es), ${buzz} buzzword(s) across the knowledge base.`,
     fix: aScore < 5 ? "Cut em dashes and buzzwords (leverage, robust, spearheaded, …)." : undefined,
   });
 

@@ -2,6 +2,7 @@ import EmptyState from "@/components/EmptyState";
 import Link from "next/link";
 import { getMetricsGlance, type MetricStatus } from "../../lib/dashboard";
 import KbNav from "../../components/KbNav";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export default async function MetricsGlancePage() {
     <div className="mx-auto max-w-[1400px] px-4 py-4">
       <KbNav active="/metrics" />
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-lg font-semibold tracking-tight">Numbers</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Numbers<Byline name="Biographer" /></h1>
         <div className="text-muted flex items-center gap-3 text-xs">
           <span className="flex items-center gap-1"><i className={`inline-block h-2 w-2 rounded-full ${STATUS_STYLE.DEFENDED}`} />defended</span>
           <span className="flex items-center gap-1"><i className={`inline-block h-2 w-2 rounded-full ${STATUS_STYLE.PARTIAL}`} />partial, frame it</span>

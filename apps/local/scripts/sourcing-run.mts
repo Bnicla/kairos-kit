@@ -17,7 +17,7 @@ import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { boardFromUrl, FILTER_GATES, runSourcingSweep, type FilterGate } from "@kairos/engine/sourcing/sweep";
 import {
   deriveSearchProfile,

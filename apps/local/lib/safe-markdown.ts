@@ -3,7 +3,7 @@ import { Marked, type Tokens } from "marked";
 /**
  * Markdown to HTML for the dashboard, with raw HTML turned into visible text.
  *
- * Everything the dashboard renders (the record, prep notes, insights, cover
+ * Everything the dashboard renders (the knowledge base, prep notes, insights, cover
  * letters, the voice profile) is written by a model from documents and job
  * postings the user did not write. A `<script>`, an `<img onerror=...>` or a
  * `javascript:` link in that text must not run in the dashboard. Markdown

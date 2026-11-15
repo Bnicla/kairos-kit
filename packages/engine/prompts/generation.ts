@@ -1,4 +1,5 @@
 import type { Experience } from "@kairos/engine/kb/types";
+import { wordedText } from "@kairos/engine/wording";
 import type { TrackGuidance } from "@kairos/engine/tracks";
 import { serializeExperience, stripUnverified } from "@kairos/engine/kb/experience";
 import { houseStyle } from "@kairos/engine/prompts/voice";
@@ -117,7 +118,7 @@ export function buildGenerationUserMessage(input: GenerationInput): string {
     "```",
     "",
     "OUTPUT CONTRACT (return exactly this shape):",
-    OUTPUT_CONTRACT,
+    wordedText(OUTPUT_CONTRACT),
   ].join("\n");
 }
 

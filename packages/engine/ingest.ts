@@ -7,7 +7,7 @@
  * stripped, and instruction-shaped lines are quoted in `guard`. The snapshot
  * stores the guard's verdict and COUNTS only, never the removed hidden text.
  */
-import { fetchPublic } from "./safe-fetch";
+import { fetchPublic, readTextCapped } from "./safe-fetch";
 import {
   guardPosting,
   htmlToText,
@@ -58,7 +58,7 @@ async function getJson(url: string, init?: RequestInit): Promise<unknown | null>
       },
     });
     if (!res.ok) return null;
-    return await res.json();
+    return JSON.parse(await readTextCapped(res));
   } catch {
     return null;
   }
@@ -266,7 +266,7 @@ export async function fetchJobAd(url: string): Promise<IngestedAd> {
       signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
-    const html = await res.text();
+    const html = await readTextCapped(res);
     const g = guardPosting({ html });
     if (g.cleanText.length < 200) {
       // Over-hiding (e.g. a page that hides its body until JS runs) must not
@@ -329,7 +329,8 @@ function buildSnapshotMarkdown(input: {
   const frontmatter = [
     "---",
     `captured_at: "${captured_at}"`,
-    input.source_url ? `source_url: ${input.source_url}` : "source: pasted",
+    // Quoted, like the page title: an address is the user's or a page's text, and unquoted it could add lines of its own to this block.
+    input.source_url && /^https?:\/\//i.test(input.source_url) ? `source_url: ${JSON.stringify(input.source_url)}` : "source: pasted",
     input.pageTitle ? `page_title: ${JSON.stringify(input.pageTitle)}` : null,
     'capture_note: "Full text snapshot preserved so the candidate can review pre-interview even if the posting is removed."',
     ...guardFrontmatter(input.guard),

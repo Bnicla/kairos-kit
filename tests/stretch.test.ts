@@ -183,3 +183,97 @@ describe("saveGeneratedResume + stretch", () => {
     expect(r.stretch.map((f) => f.trigger)).toEqual(["mandatory"]);
   });
 });
+
+/**
+ * Verb swaps (15 November 2026, from the outside audit of 14 November): the knowledge base says the candidate took
+ * part, or shared the work, and the résumé line says they led it, owned it or made it. Every noun and every number
+ * of the fact is kept, so the line's origin is strong and the numbers are grounded: only this check can see it.
+ * Invented facts.
+ */
+describe("verb swaps: the fact's nouns and numbers kept, the candidate's part made bigger", () => {
+  const kb = (fact: string) => [
+    parseExperience(
+      "01-acme.md",
+      `---\nid: acme-pm\ncompany: Acme\ntitle: Product Manager\nstart: '2024'\nend: '2026'\n---\n\n## Achievements\n- ${fact} [R]\n`,
+    ),
+  ];
+  const check = (fact: string, bullet: string) => checkResumeStretch(resume([bullet]), kb(fact));
+
+  const swaps: [string, string, string][] = [
+    // The four the audit names.
+    ["supported to led", "Supported the launch of the billing portal in 12 markets.", "Led the launch of the billing portal in 12 markets."],
+    ["helped to owned", "Helped the pricing team with the release metrics for 12 markets.", "Owned the release metrics for 12 markets."],
+    ["contributed to created", "Contributed to the onboarding guide for new enterprise customers.", "Created the onboarding guide for new enterprise customers."],
+    ["one of a team to sole owner", "One of a team of five that ran the migration of the billing database.", "Sole owner of the migration of the billing database."],
+    // The audit's own example sentence.
+    ["took part to led and owned", "Took part in launch planning and monitored release metrics for 12 markets.", "Led launch planning and owned release metrics across 12 markets."],
+    // The same kind, other words.
+    ["assisted to managed", "Assisted the finance lead with the quarterly forecast for three regions.", "Managed the quarterly forecast for three regions."],
+    ["helped build to built", "Helped build the reporting dashboard used by 40 account managers.", "Built the reporting dashboard used by 40 account managers."],
+    ["contributed to the design to designed", "Contributed to the design of the partner API for 9 integrations.", "Designed the partner API for 9 integrations."],
+    ["participated to ran", "Participated in the weekly incident review for the payments service.", "Ran the weekly incident review for the payments service."],
+    ["member of the team that delivered to delivered", "Member of the team that delivered the checkout redesign for mobile users.", "Delivered the checkout redesign for mobile users."],
+    ["supported to drove", "Supported the rollout of single sign-on to 30 customer teams.", "Drove the rollout of single sign-on to 30 customer teams."],
+    ["helped to spearheaded", "Helped the sales team with the renewal playbook for mid-market accounts.", "Spearheaded the renewal playbook for mid-market accounts."],
+    ["one of three who wrote to wrote", "One of three engineers who wrote the fraud rules for card payments.", "Wrote the fraud rules for card payments."],
+    ["one of a team that ran to ran", "One of a team of five that ran the migration of the billing database.", "Ran the migration of the billing database."],
+    ["one of a team to owner of", "One of a team of five that ran the migration of the billing database.", "Owner of the migration of the billing database."],
+    ["one of a team to single-handedly", "One of a team of five that ran the migration of the billing database.", "Single-handedly ran the migration of the billing database."],
+    // Shared work, then alone.
+    ["worked with to led", "Worked with the data team on the churn model for 200 enterprise accounts.", "Led the churn model for 200 enterprise accounts."],
+    ["partnered to owned", "Partnered with the legal team on the data retention policy for EU customers.", "Owned the data retention policy for EU customers."],
+    ["co-led to led", "Co-led the vendor selection for the support platform with the operations lead.", "Led the vendor selection for the support platform."],
+    ["co-wrote to wrote", "Co-wrote the incident runbook for the payments service with two engineers.", "Wrote the incident runbook for the payments service."],
+    // "support" as a thing (a team's name) does not keep the candidate's part in view.
+    ["helped the support team to led", "Helped the customer support team with ticket triage for enterprise accounts.", "Led ticket triage for enterprise accounts on the customer support team."],
+  ];
+
+  it.each(swaps)("%s is listed", (_name, fact, bullet) => {
+    const found = check(fact, bullet);
+    expect(found.length, bullet).toBeGreaterThan(0);
+    expect(found.every((f) => f.kind === "stretch" && f.company === "Acme" && f.bullet === bullet)).toBe(true);
+    // The finding quotes what the knowledge base says, or names the absolute word.
+    expect(found.some((f) => (f.rule === "drift" && /the knowledge base says "/.test(f.detail)) || f.rule === "absolute" || f.rule === "ownership")).toBe(true);
+  });
+
+  it("the audit's four each give the finding that names the swap", () => {
+    const rules = (i: number) => check(swaps[i][1], swaps[i][2]).map((f) => `${f.rule}:${f.trigger}`);
+    expect(rules(0)).toEqual(["drift:led"]);
+    expect(rules(1)).toEqual(["drift:owned"]);
+    expect(rules(2)).toEqual(["drift:created"]);
+    expect(rules(3)).toContain("absolute:sole");
+    expect(rules(3)).toContain("drift:owner");
+    expect(check(swaps[0][1], swaps[0][2])[0].detail).toBe('the knowledge base says "supported the launch of the billing portal in 12 markets": the candidate took part, the bullet says "led"');
+    expect(check(swaps[18][1], swaps[18][2])[0].detail).toMatch(/the work was shared, the bullet says "led" alone$/);
+  });
+
+  const faithful: [string, string, string][] = [
+    ["the fact restated", "Led the launch of the billing portal in 12 markets.", "Led the launch of the billing portal in 12 markets."],
+    ["the candidate's part kept", "Supported the launch of the billing portal in 12 markets.", "Supported the launch of the billing portal in 12 markets."],
+    ["the candidate's own action, which the fact states after \"by\"", "Supported the launch of the billing portal by writing the test plan for 12 markets.", "Wrote the test plan for the launch of the billing portal in 12 markets."],
+    ["one delivery verb for another", "Built the reporting dashboard used by 40 account managers.", "Created the reporting dashboard used by 40 account managers."],
+    ["the others kept in view", "Worked with the data team on the churn model for 200 enterprise accounts.", "Built the churn model for 200 enterprise accounts with the data team."],
+    ["the shared lead kept", "Co-led the vendor selection for the support platform with the operations lead.", "Co-led the vendor selection for the support platform."],
+    ["one of several kept", "One of three engineers who wrote the fraud rules for card payments.", "One of three engineers who wrote the fraud rules for card payments."],
+    ["support given, said as a noun", "Supported the launch of the billing portal in 12 markets.", "Provided launch support for the billing portal in 12 markets."],
+  ];
+  it.each(faithful)("%s is not listed", (_name, fact, bullet) => {
+    expect(check(fact, bullet)).toEqual([]);
+  });
+
+  it("a second fact that says the candidate did lead it supports the line", () => {
+    const both = [
+      parseExperience(
+        "01-acme.md",
+        `---\nid: acme-pm\ncompany: Acme\ntitle: Product Manager\nstart: '2024'\nend: '2026'\n---\n\n## Achievements\n- Supported the launch of the billing portal in 12 markets. [R]\n- Led the launch of the billing portal in the last 4 markets. [C]\n`,
+      ),
+    ];
+    expect(checkResumeStretch(resume(["Led the launch of the billing portal in 12 markets."]), both).filter((f) => f.rule === "drift")).toEqual([]);
+  });
+
+  it("known limit, stated: work done with others and written as a plain delivery verb is not listed", () => {
+    // "Worked with the data team on the churn model" does not say who built it; "Built the churn model" drops the team
+    // and claims no lead. The check lists a lead claim ("led", "owned") here, not a delivery verb.
+    expect(check("Worked with the data team on the churn model for 200 enterprise accounts.", "Built the churn model for 200 enterprise accounts.")).toEqual([]);
+  });
+});

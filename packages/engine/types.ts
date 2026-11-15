@@ -71,7 +71,7 @@ export interface RequirementCoverageRow {
 export type OriginStrength = "strong" | "partial" | "none";
 
 /**
- * The origin of one résumé line: the verified fact or facts of the record it
+ * The origin of one résumé line: the verified fact or facts of the knowledge base it
  * comes from, found in code (line-origin.ts), not taken from the model's
  * provenance_audit. One per bullet, role intro and executive-summary sentence.
  */
@@ -88,8 +88,11 @@ export interface LineOrigin {
   strength: OriginStrength;
   /** Share of the line's content words found in the facts below, 0 to 1. */
   overlap: number;
-  /** The facts, as the record writes them (tag included), with the id of their entry. Empty when the strength is "none". */
-  facts: { experience_id: string; fact: string }[];
+  /**
+   * The facts, as the knowledge base writes them (tag included), with the id of their entry. Empty when the strength is "none".
+   * A fact of an education entry carries `education`: the entry's institution (or its credential), for the view to name.
+   */
+  facts: { experience_id: string; fact: string; education?: string }[];
 }
 
 export interface GeneratedResume {

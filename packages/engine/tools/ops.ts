@@ -1,4 +1,5 @@
-import matter from "gray-matter";
+import matter from "../front-matter";
+import { worded } from "@kairos/engine/wording";
 import { resumeLengthPolicy } from "@kairos/engine/length-policy";
 import { allowedMetricStatuses, loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import type { Store } from "@kairos/engine/store/types";
@@ -142,7 +143,7 @@ export async function saveGeneratedResume(
   );
   if (hardGrounding.length) {
     throw new Error(
-      `Resume failed grounding against the knowledge base: ${hardGrounding.map((g) => `[${g.kind}] ${g.detail}`).join("; ")}`,
+      worded`Resume failed grounding against the knowledge base: ${hardGrounding.map((g) => `[${g.kind}] ${g.detail}`).join("; ")}`,
     );
   }
   for (const g of grounding) warnings.push(`[${g.kind}] ${g.detail}`);
@@ -167,8 +168,8 @@ export async function saveGeneratedResume(
   const denied = stretchAll.filter((f) => f.kind === "denied");
   if (denied.length) {
     throw new Error(
-      `Resume uses phrasing the knowledge base forbids: ${denied.map((f) => `[${f.company}] "${f.trigger}" in "${f.bullet}"`).join("; ")}. ` +
-        `Rewrite with the knowledge base's own wording.`,
+      worded`Resume uses phrasing the knowledge base forbids: ${denied.map((f) => `[${f.company}] "${f.trigger}" in "${f.bullet}"`).join("; ")}. ` +
+        worded`Rewrite with the knowledge base's own wording.`,
     );
   }
   const stretch = stretchAll.filter((f) => f.kind === "stretch");
@@ -211,14 +212,14 @@ export async function saveGeneratedResume(
   // the hard floor sits at 1050 and the visual probe refines from there.
   const wordCount = md.split(/\s+/).filter((w) => /\w/.test(w)).length;
   // Only a two-page résumé has a word floor. The page target comes from
-  // profile.md (target_pages) or, when unset, from the years in the record, so
+  // profile.md (target_pages) or, when unset, from the years in the knowledge base, so
   // a student's one-page résumé with four entries is never sent back as short.
   const pagePolicy = resumeLengthPolicy(experiences, { override: settings.target_pages });
   const fullCareerResume = pagePolicy.targetPages === 2 && gen.resume.experience.length >= 4; // skip gate for short/test fixtures
   if (fullCareerResume && wordCount < 1050) {
     throw new Error(
       `Resume too short for the two-page layout: ${wordCount} words (needs ~1200-1300). ` +
-        `Do not pad with filler: restore more of the knowledge base's curated achievement bullets ` +
+        worded`Do not pad with filler: restore more of the knowledge base's curated achievement bullets ` +
         `(second bullets for later roles are usually what got over-trimmed).`,
     );
   }
@@ -246,7 +247,7 @@ export async function saveGeneratedResume(
   // ATS coverage vs the captured ad — advisory, surfaced to the caller. The
   // docx headline is part of what a parser sees, so it counts toward coverage.
   const snapshot = (await readSnapshot(store, appId)) ?? "";
-  const ats = checkAtsCoverage(snapshot, `${md}\n${opts.headline ?? ""}`);
+  const ats = checkAtsCoverage(snapshotBody(snapshot), `${md}\n${opts.headline ?? ""}`);
   if (ats.coverage < 0.6) {
     warnings.push(
       `ATS coverage ${(ats.coverage * 100).toFixed(0)}% — missing JD terms: ${ats.missing.slice(0, 8).join(", ")}`,
@@ -258,10 +259,11 @@ export async function saveGeneratedResume(
   // résumé. The model's provenance_audit is compared with them, not trusted.
   // A line with no origin is listed for the user and never blocks: what is
   // clearly unsupported was blocked above.
-  const origins = checkLineOrigins(gen, experiences, { candidateName: profileName(profileRaw) });
+  const origins = checkLineOrigins(gen, experiences, { candidateName: profileName(profileRaw), education });
 
   // Persist the three artifacts together so they can never desync.
-  await store.writeJson(["applications", appId, "resume.json"], { ...gen, line_origins: origins.lines });
+  // docx_headline: the headline the Word file is written with, so that the same file can be written again from the text.
+  await store.writeJson(["applications", appId, "resume.json"], { ...gen, line_origins: origins.lines, ...(opts.headline ? { docx_headline: opts.headline } : {}) });
   await saveResumeSource(store, appId, md);
   // Paper: an uploaded template's own size wins, else the user's setting.
   const paper = opts.template?.paper ?? (await loadResumePaper(store));
@@ -292,10 +294,17 @@ export interface LetterNumberCheck {
 /**
  * The number check every cover-letter save runs, whichever path wrote the
  * letter (the MCP tool or the dashboard's one-click letter): each number must
- * come from the verified record, the profile, education or the posting, and
+ * come from the verified knowledge base, the profile, education or the posting, and
  * must not be one the metrics register withholds.
  */
-export async function checkLetterNumbers(store: Store, appId: string, markdown: string): Promise<LetterNumberCheck> {
+export async function checkLetterNumbers(
+  store: Store,
+  appId: string,
+  markdown: string,
+  /** `what`: the document's name in the message ("letter" by default). `extraSources`: other text a number may come from. */
+  opts: { what?: string; extraSources?: string } = {},
+): Promise<LetterNumberCheck> {
+  const what = opts.what ?? "letter";
   const [experiences, education, profileRaw, snapshot, registerRaw] = await Promise.all([
     loadExperiences(store),
     loadEducation(store).catch(() => [] as string[]),
@@ -304,25 +313,29 @@ export async function checkLetterNumbers(store: Store, appId: string, markdown: 
     store.readFile(METRICS_REGISTER_PATH),
   ]);
   const posting = snapshotBody(snapshot);
-  const sources = [profileRaw ?? "", JSON.stringify(education), posting].join("\n");
+  const sources = [profileRaw ?? "", JSON.stringify(education), posting, opts.extraSources ?? ""].join("\n");
   const ungrounded = ungroundedNumbers(markdown, experiences, sources);
   const allowed = allowedMetricStatuses(readProfileSettings(profileRaw));
   const blocked = registerBlockedNumbers(markdown, registerRaw, allowed);
   const parts: string[] = [];
   if (ungrounded.length) {
     parts.push(
-      `${ungrounded.length} number(s) in the letter are not in the user's verified record, profile, education or the posting: ${ungrounded.join(", ")}. ` +
+      `${ungrounded.length} number(s) in the ${what} are not in the user's verified knowledge base, profile, education or the posting: ${ungrounded.join(", ")}. ` +
         `Remove them, or ask the user and record the fact first (save_confirmed_fact / save_metric).`,
     );
   }
   if (blocked.length) {
-    parts.push(`${blocked.length} number(s) in the letter are withheld by the metrics register: ${describeMetricStatusIssues(blocked, allowed)}`);
+    parts.push(`${blocked.length} number(s) in the ${what} are withheld by the metrics register: ${describeMetricStatusIssues(blocked, allowed)}`);
   }
   return { ungrounded, blocked, message: parts.length ? `Not saved: ${parts.join(" ")}` : null };
 }
 
-/** The posting text of a snapshot, without its frontmatter (the raw text when the frontmatter does not parse). */
-function snapshotBody(snapshot: string | null): string {
+/**
+ * The posting text of a snapshot, without its frontmatter (the raw text when the frontmatter does not parse).
+ * The frontmatter is Kairos's own (capture note, posting-guard counts): read as posting text, its words
+ * ("posting", "hidden", "chars") were counted as terms the résumé is missing.
+ */
+export function snapshotBody(snapshot: string | null): string {
   if (!snapshot) return "";
   try {
     return matter(snapshot).content.trim();
@@ -332,7 +345,7 @@ function snapshotBody(snapshot: string | null): string {
 }
 
 /** The profile's `name` (frontmatter), or undefined. */
-function profileName(profileRaw: string): string | undefined {
+export function profileName(profileRaw: string): string | undefined {
   try {
     const n = (matter(profileRaw).data as Record<string, unknown>).name;
     return typeof n === "string" && n.trim() ? n.trim() : undefined;

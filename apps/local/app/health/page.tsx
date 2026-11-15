@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getHealth } from "@/lib/dashboard";
 import type { HealthDimension } from "@kairos/engine/health";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function HealthPage() {
         <Link href="/" className="text-muted text-xs hover:underline">
           ← Dashboard
         </Link>
-        <h1 className="text-xl font-semibold tracking-tight">Résumé health check</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Résumé health check<Byline name="Biographer" /></h1>
         <p className="text-muted text-sm">
           A job-agnostic quality report on your knowledge base. Every fix is a Kairos action, never an upsell.
         </p>

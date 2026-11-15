@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getKnowledgeBase, type KBDepth } from "@/lib/dashboard";
 import KbNav from "../../components/KbNav";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function KBPage({ searchParams }: { searchParams: Promise<{
       <KbNav active="/kb" />
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Knowledge base</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Knowledge base<Byline name="Biographer" /></h1>
           <p className="text-muted text-sm">
             {kb.experiences.length} experiences · every fact comes from you (documents, answers, notes) and keeps its source
           </p>

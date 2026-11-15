@@ -2,6 +2,7 @@ import EmptyState from "@/components/EmptyState";
 import { getDeepDives } from "../../lib/dashboard";
 import KbNav from "../../components/KbNav";
 import PrintButton from "../../components/PrintButton";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export default async function DeepDivesPage() {
       <KbNav active="/deep-dives" />
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Deep dives</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Deep dives<Byline name="Biographer" /></h1>
           <p className="text-muted text-sm">
             The zoom-in layer: war stories with their fix levers, and the approved depth notes behind
             the headline STAR stories. For when an interviewer says &ldquo;go deeper&rdquo;.

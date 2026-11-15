@@ -164,7 +164,7 @@ describe("saveGeneratedResume and the metrics register", () => {
     await expect(saveGeneratedResume(store, appId, resume(["Cut review time by 50% and saved $4M a year."]))).resolves.toBeTruthy();
   });
 
-  it("still refuses a number that is not in the record, register or not", async () => {
+  it("still refuses a number that is not in the knowledge base, register or not", async () => {
     const { store, appId } = await home({ register: REGISTER });
     await expect(saveGeneratedResume(store, appId, resume(["Saved $9M a year."]))).rejects.toThrow(/ungrounded_metric/);
   });
@@ -179,7 +179,7 @@ describe("saveGeneratedResume and the metrics register", () => {
 });
 
 describe("checkLetterNumbers: the one number check for every cover-letter path", () => {
-  it("passes numbers from the record and from the posting", async () => {
+  it("passes numbers from the knowledge base and from the posting", async () => {
     const { store, appId } = await home({ register: REGISTER });
     const r = await checkLetterNumbers(store, appId, LETTER("I saved $4M a year, and you run 80% of your volume through two sites."));
     expect(r).toEqual({ ungrounded: [], blocked: [], message: null });
@@ -189,7 +189,7 @@ describe("checkLetterNumbers: the one number check for every cover-letter path",
     const { store, appId } = await home();
     const r = await checkLetterNumbers(store, appId, LETTER("I grew revenue by 35% in one quarter."));
     expect(r.ungrounded).toEqual(["35%"]);
-    expect(r.message).toMatch(/^Not saved: 1 number\(s\) in the letter are not in the user's verified record, profile, education or the posting: 35%/);
+    expect(r.message).toMatch(/^Not saved: 1 number\(s\) in the letter are not in the user's verified knowledge base, profile, education or the posting: 35%/);
   });
 
   it("names a recorded number the register withholds", async () => {

@@ -48,7 +48,7 @@ describe("kairosHome()", () => {
   });
 });
 
-// The installer refuses a data folder that holds a record it did not create.
+// The installer refuses a data folder that holds a knowledge base it did not create.
 const zsh = existsSync("/bin/zsh");
 describe.skipIf(!zsh)("install.sh data folder", () => {
   let kit: string;
@@ -81,7 +81,7 @@ describe.skipIf(!zsh)("install.sh data folder", () => {
   };
 
   // install.sh runs a few node processes: give it room when the whole suite runs in parallel.
-  it("refuses an existing record it did not create, and changes nothing", { timeout: 30_000 }, () => {
+  it("refuses an existing knowledge base it did not create, and changes nothing", { timeout: 30_000 }, () => {
     const record = join(fakeHome, "Kairos");
     mkdirSync(join(record, "knowledge-base"), { recursive: true });
     writeFileSync(join(record, "profile.md"), "someone's record\n");

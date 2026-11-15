@@ -10,7 +10,8 @@ Follow the `kairos` skill (Reviewing history). Arguments: `$ARGUMENTS`
    memory of earlier in the conversation.
 2. Group by status and give counts: captured, scored, drafted, applied,
    interviewing, offer, and closed (rejected, withdrawn, listing closed, on
-   hold). New jobs from the daily search are on the board's Sourced column.
+   hold). New jobs from the daily search (the Scout's list) are on the board's
+   Sourced column.
 3. Then the actions, most urgent first, one line each:
    - interviews coming up (offer `/prep`);
    - drafted résumés not yet sent;

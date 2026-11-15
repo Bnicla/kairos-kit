@@ -1,6 +1,6 @@
 # Security
 
-Kairos Kit runs on the user's own Mac and keeps the user's career record in a
+Kairos Kit runs on the user's own Mac and keeps the user's knowledge base in a
 local folder. It reads text it does not control (job postings, application
 forms, web pages) and writes documents that go out under the user's name. How
 it is protected is described in [docs/architecture.md](docs/architecture.md#controls).
@@ -15,7 +15,7 @@ personal project maintained by one person, and there is no bounty.
 
 ## In scope
 
-- A job posting, form or web page that gets a fact into the user's record, a
+- A job posting, form or web page that gets a fact into the user's knowledge base, a
   document or a form without the user's approval.
 - Reading or sending a file outside the documents the user gave the kit.
 - Reaching the dashboard, its API or the extension's endpoints from another

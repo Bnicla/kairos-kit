@@ -6,9 +6,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { copyFile, rename, rm, readdir, readFile } from "node:fs/promises";
 import { dirname, join, basename } from "node:path";
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { checkAtsText, type AtsExpect, type AtsResult } from "@kairos/engine/ats-text";
 import { submissionFileName, type SubmissionDoc } from "@kairos/engine/file-names";
+import { childEnv } from "./child-env";
 
 /**
  * Render a .docx to a PDF sitting next to it (same directory, same stem).
@@ -37,11 +38,24 @@ const LO_PROFILE = "file:///tmp/lo-kairos-pdf";
 // svp = LibreOffice's true headless display backend: it never touches the macOS
 // window server, so no icon flashes into the Dock/app tray on each conversion
 // (plain --headless still registers a GUI app on macOS and bounces the Dock).
-const HEADLESS_ENV = { ...process.env, SAL_USE_VCLPLUGIN: "svp" };
+// A short environment of its own (child-env.ts): LibreOffice gets none of the server's settings.
+const HEADLESS_ENV = childEnv({ SAL_USE_VCLPLUGIN: "svp" });
+
+/**
+ * One conversion at a time: every conversion uses the same LibreOffice profile
+ * folder, and two at once lock each other out. On the Mac there is one user;
+ * under the hosted connector several users can ask at the same moment.
+ */
+let conversions: Promise<unknown> = Promise.resolve();
+export function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const run = conversions.then(work, work);
+  conversions = run.catch(() => undefined);
+  return run;
+}
 
 async function sofficePresent(): Promise<boolean> {
   try {
-    await execFileAsync("test", ["-x", SOFFICE]);
+    await execFileAsync("test", ["-x", SOFFICE], { env: childEnv() });
     return true;
   } catch {
     return false;
@@ -52,7 +66,11 @@ async function sofficePresent(): Promise<boolean> {
  * Convert `docxPath` → sibling `.pdf`. Returns the pdf path on success, null if
  * LibreOffice is unavailable or the conversion failed.
  */
-export async function renderDocxToPdf(docxPath: string): Promise<string | null> {
+export function renderDocxToPdf(docxPath: string): Promise<string | null> {
+  return oneAtATime(() => convertDocxToPdf(docxPath));
+}
+
+async function convertDocxToPdf(docxPath: string): Promise<string | null> {
   if (!(await sofficePresent())) return null;
   const outDir = dirname(docxPath);
   const stem = basename(docxPath).replace(/\.docx$/i, "");
@@ -127,7 +145,7 @@ export async function pdftotextPath(): Promise<string | null> {
   if (pdftotextResolved !== undefined) return pdftotextResolved;
   for (const candidate of PDFTOTEXT_CANDIDATES) {
     try {
-      await execFileAsync("test", ["-x", candidate]);
+      await execFileAsync("test", ["-x", candidate], { env: childEnv() });
       return (pdftotextResolved = candidate);
     } catch {
       /* try the next one */
@@ -150,6 +168,7 @@ export async function extractPdfText(pdfPath: string): Promise<string | null> {
       timeout: 20_000,
       maxBuffer: 16 * 1024 * 1024,
       encoding: "utf8",
+      env: childEnv(),
     });
     return stdout;
   } catch {

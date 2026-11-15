@@ -1,11 +1,11 @@
 /**
- * Tracks: several profiles per user, one record.
+ * Tracks: several profiles per user, one knowledge base.
  *
  * A track is one direction the user is applying in ("Product management",
  * "Consulting"). It holds positioning only: headline, target titles, search
  * terms, the bridge story, the evidence map, the base résumé, the cover-letter
  * angle. It never holds or edits facts: dates, titles, employers and numbers
- * always come from the record, so every track tells the same true story.
+ * always come from the knowledge base, so every track tells the same true story.
  *
  * Storage: `tracks/<id>.json` in the data folder. A user with no track files
  * has one virtual track, "main", read from profile.md, so nothing changes for
@@ -14,7 +14,7 @@
  *
  * Spec: docs/career-advisor-spec.md §7.
  */
-import matter from "gray-matter";
+import matter from "./front-matter";
 import { z } from "zod";
 import type { Store } from "@kairos/engine/store/types";
 import { slugify } from "@kairos/engine/applications";
@@ -29,7 +29,7 @@ export const TrackStatus = z.enum(["active", "paused", "dropped"]);
 export const EvidenceMapItem = z.object({
   /** KB experience id (file name without .md) the evidence lives in. */
   experience_id: z.string().min(1),
-  /** The fact as the record states it. */
+  /** The fact as the knowledge base states it. */
   fact: z.string().min(1),
   /** The target field's own words for it, used only where the fact supports them. */
   field_terms: z.array(z.string()).optional(),
@@ -147,7 +147,7 @@ export interface SaveTrackInput {
  * omitted are kept. The first save when only the virtual main track exists
  * also writes main to disk, so the user's current profile stays a track.
  * Refuses a fourth active track, and an evidence map that cites an experience
- * the record does not hold.
+ * the knowledge base does not hold.
  */
 export async function saveTrack(
   store: Store,
@@ -163,7 +163,7 @@ export async function saveTrack(
   if (input.evidence_map && opts.experienceIds) {
     const known = new Set(opts.experienceIds);
     const unknown = input.evidence_map.filter((e) => !known.has(e.experience_id)).map((e) => e.experience_id);
-    if (unknown.length) throw new Error(`evidence_map cites experiences that are not in the record: ${[...new Set(unknown)].join(", ")}`);
+    if (unknown.length) throw new Error(`evidence_map cites experiences that are not in the knowledge base: ${[...new Set(unknown)].join(", ")}`);
   }
 
   const merged = TrackSchema.parse({
@@ -209,12 +209,12 @@ export interface TrackGuidance {
 export const TRACK_RULES = [
   "The track is positioning only. Every fact (employer, title, dates, numbers, scope) comes from candidate.experiences, unchanged.",
   "Use the track's headline, target roles and evidence map to choose, order and word what goes on the page.",
-  "field_terms may replace the record's wording only where the fact itself supports them; never add a title, responsibility or result the record does not hold.",
+  "field_terms may replace the knowledge base's wording only where the fact itself supports them; never add a title, responsibility or result the knowledge base does not hold.",
 ];
 
 export const SWITCH_TRACK_RULES = [
   "This is a change of field. Score the posting as written: do not raise the band to make up for a missing title or domain.",
-  "In the justifications, name the transferable evidence (record facts that prove the posting's needs under a different title) and list the gaps plainly.",
+  "In the justifications, name the transferable evidence (knowledge base facts that prove the posting's needs under a different title) and list the gaps plainly.",
 ];
 
 export function trackGuidance(track: Track | null | undefined): TrackGuidance | null {

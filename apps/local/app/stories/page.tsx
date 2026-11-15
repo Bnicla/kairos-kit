@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getStarStories, type StarStory, type StarStoryMetrics } from "../../lib/dashboard";
 import PrintButton from "../../components/PrintButton";
 import KbNav from "../../components/KbNav";
+import Byline from "@/components/Byline";
 
 export const dynamic = "force-dynamic";
 
@@ -104,7 +105,7 @@ export default async function StoriesPage({ searchParams }: { searchParams: Prom
     return (
       <div className="mx-auto max-w-5xl px-6 py-8">
         <KbNav active="/stories" />
-        <h1 className="text-xl font-semibold tracking-tight">STAR stories repository</h1>
+        <h1 className="text-xl font-semibold tracking-tight">STAR stories repository<Byline name="Biographer" /></h1>
         <EmptyState
           title="No STAR stories yet"
           file="knowledge-base/star-stories.json"
@@ -122,7 +123,7 @@ export default async function StoriesPage({ searchParams }: { searchParams: Prom
       <KbNav active="/stories" />
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">STAR stories repository</h1>
+          <h1 className="text-xl font-semibold tracking-tight">STAR stories repository<Byline name="Biographer" /></h1>
           <p className="text-muted text-sm">
             {full
               ? `${storyCount} stories across ${behavioralThemes.length} behavioral themes`

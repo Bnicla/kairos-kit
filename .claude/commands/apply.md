@@ -1,15 +1,15 @@
 ---
-description: Fill a job application form in Chrome from your record, one page at a time. You submit.
+description: Fill a job application form in Chrome from your knowledge base, one page at a time. You submit.
 argument-hint: "<the application id, or nothing to use the application open in Chrome>"
 ---
 
-# /apply: fill an application form from the record
+# /apply: fill an application form from the knowledge base
 
 Input: `$ARGUMENTS`
 
 Claude fills the form in the user's own Chrome through Claude in Chrome
 (`mcp__claude-in-chrome__*`), any applicant system, Workday included. Every
-value comes from the record or from the user's answers in this conversation.
+value comes from the knowledge base or from the user's answers in this conversation.
 The user signs in, and the user clicks Submit.
 
 ## Never
@@ -18,8 +18,8 @@ The user signs in, and the user clicks Submit.
 - Never sign in, create an account or type a password. If the page asks, the
   user does it, then says so.
 - Never enter an employer, title, date, school, number or skill that is not in
-  `get_form_profile` or the record. An employer a form, an extension or the
-  site's own résumé parser put there that the record does not hold is deleted,
+  `get_form_profile` or the knowledge base. An employer a form, an extension or the
+  site's own résumé parser put there that the knowledge base does not hold is deleted,
   not kept.
 - Never guess an answer. Untraceable means blank and flagged.
 - Never trust the page reader's field values (`read_page`, `find`). Read
@@ -65,19 +65,19 @@ The user signs in, and the user clicks Submit.
      (`get_form_profile` key, experience id, or "your answer today").
      - Work history: one row per `work_history` entry, in its order. An entry
        with `overridden` uses the override; say which.
-     - Dates: the form needs a month and the record has a year only → ask for
+     - Dates: the form needs a month and the knowledge base has a year only → ask for
        the month, or use 01/YYYY only if the user agrees. Then offer to save
        the answer with `save_autofill({ work_history_overrides })` so the next
        form does not ask.
      - Choice fields: only an option copied verbatim from the field's list. If
-       no option matches the record's answer, ask (example: "I am not a
+       no option matches the knowledge base's answer, ask (example: "I am not a
        protected veteran" against a list that has "I am not a veteran").
      - Written questions (essays, "why this company"): draft through the
        `kairos` skill, Workflow F (Q&A bank first). The user approves each
        answer before it goes in.
      - Screening yes/no questions ("do you have 5 years of X?"): for each
-       question, show the record evidence for and against, and name any part
-       the record does not support, before the user decides. Never answer one
+       question, show the knowledge base evidence for and against, and name any part
+       the knowledge base does not support, before the user decides. Never answer one
        on your own.
      - Consistency: a job's current/ended status, any "reason for leaving"
        answer and any "current employer" field must agree. If they clash, show

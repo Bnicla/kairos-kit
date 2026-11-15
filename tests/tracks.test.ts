@@ -17,7 +17,7 @@ import { buildGenerationUserMessage } from "@kairos/engine/prompts/generation";
 import { buildScoringUserMessage } from "@kairos/engine/prompts/scoring";
 import { buildCoverLetterUserMessage } from "@kairos/engine/prompts/cover-letter";
 
-/** Tracks: several profiles per user over one record (docs/career-advisor-spec.md §7). */
+/** Tracks: several profiles per user over one knowledge base (docs/career-advisor-spec.md §7). */
 
 const PROFILE = `---
 name: Alex Example
@@ -80,8 +80,8 @@ describe("tracks", () => {
     expect(r.track.evidence_map).toHaveLength(1);
   });
 
-  it("refuses an evidence map that cites an experience the record does not hold", async () => {
-    await expect(saveTrack(store, PROFILE, pm, { experienceIds: ["02-other"] })).rejects.toThrow(/not in the record: 01-acme-consulting/);
+  it("refuses an evidence map that cites an experience the knowledge base does not hold", async () => {
+    await expect(saveTrack(store, PROFILE, pm, { experienceIds: ["02-other"] })).rejects.toThrow(/not in the knowledge base: 01-acme-consulting/);
   });
 
   it(`refuses more than ${MAX_ACTIVE_TRACKS} active tracks, and accepts a paused one`, async () => {

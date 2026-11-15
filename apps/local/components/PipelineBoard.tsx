@@ -24,6 +24,7 @@ function GenerateButton({ label, pendingLabel }: { label: string; pendingLabel: 
 }
 import SourceJobsButton from "@/components/SourceJobsButton";
 import { useFormStatus } from "react-dom";
+import Byline from "@/components/Byline";
 
 /** Submit button for tracking a sourced card; pending state covers the ad fetch. */
 function TrackButton() {
@@ -124,7 +125,7 @@ export default function PipelineBoard({
         {hasSourced && (
           <div className="min-w-0">
             <div className="text-muted mb-2 flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wide">
-              <span>Sourced</span>
+              <span>Sourced<Byline name="Scout" /></span>
               <span className="bg-surface-2 rounded-full px-1.5 py-0.5 tabular-nums">{filteredSourced.length}</span>
             </div>
             <div className="space-y-2">
@@ -243,6 +244,20 @@ export default function PipelineBoard({
                         {a.score_band && (
                           <span className={`badge ${BAND_TONE[a.score_band] ?? "badge-neutral"} text-[10px]`}>
                             {a.score_band}
+                          </span>
+                        )}
+                        {a.contacts && (
+                          <span
+                            className="badge badge-info text-[10px]"
+                            title={
+                              a.contacts.at > 0
+                                ? `You know ${a.contacts.at} ${a.contacts.at === 1 ? "person" : "people"} at ${a.company} (LinkedIn connections). Open the card to see them.`
+                                : `${a.contacts.similar} of your LinkedIn connections work at a company with a similar name. Open the card to check.`
+                            }
+                          >
+                            {a.contacts.at > 0
+                              ? `${a.contacts.at} contact${a.contacts.at === 1 ? "" : "s"}`
+                              : `${a.contacts.similar} possible contact${a.contacts.similar === 1 ? "" : "s"}`}
                           </span>
                         )}
                       </div>

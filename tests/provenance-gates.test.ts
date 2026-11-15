@@ -101,19 +101,19 @@ describe("plain counts", () => {
     expect(extractCountTokens("After 9 years in payments. Led a team of 12 in Austin.").map((x) => x.value)).toEqual(["12"]);
   });
 
-  it("blocks a count the record never states, and accepts one it does (digits or words)", () => {
+  it("blocks a count the knowledge base never states, and accepts one it does (digits or words)", () => {
     expect(kinds(resume({ bullets: ["Take part in the on-call rotation with a team of 12 engineers."] }))).toEqual(["ungrounded_count"]);
     expect(kinds(resume({ bullets: ["Piloted preview environments with 2 teams.", "Mentor 3 engineers.", "Moved 1.8 billion entries."] }))).toEqual([]);
     expect(kinds(resume({ bullets: ["Piloted preview environments with two teams."] }))).toEqual([]);
   });
 
-  it("binds a count to its employer, and checks the summary against the whole record", () => {
+  it("binds a count to its employer, and checks the summary against the whole knowledge base", () => {
     expect(kinds(resume({ bullets: ["Unblocked 15 engineers with preview environments."] }))).toEqual(["count_source_mismatch"]);
     expect(kinds(resume({ executive_summary: "Engineer who unblocked 15 engineers.", bullets: [] }))).toEqual([]);
     expect(kinds(resume({ executive_summary: "Engineer who led 60 engineers.", bullets: [] }))).toEqual(["ungrounded_count"]);
   });
 
-  it("does not take a date part or a percentage of the record as a count", () => {
+  it("does not take a date part or a percentage of the knowledge base as a count", () => {
     // "2019-12" and "2022-03" are dates in the frontmatter, not a 12 or a 3.
     expect(kinds(resume({ company: "Tallgrass Logistics", bullets: ["Worked with 12 carriers."] }))).toEqual(["ungrounded_count"]);
   });
@@ -129,18 +129,18 @@ describe("credentials, skills and education", () => {
     expect(credentialPhrases("Certified 40 partners and sat on the company's safety certification group.")).toEqual([]);
   });
 
-  it("blocks a credential the record does not hold, on the skills line or in prose", () => {
+  it("blocks a credential the knowledge base does not hold, on the skills line or in prose", () => {
     expect(kinds(resume({ skills: ["Go", "AWS Certified Solutions Architect"] }))).toEqual(["ungrounded_credential"]);
     expect(kinds(resume({ skills: ["Project Management Professional (PMP)"] }))).toContain("ungrounded_credential");
     expect(kinds(resume({ executive_summary: "Engineer and Certified Kubernetes Administrator.", bullets: [] }))).toEqual(["ungrounded_credential"]);
   });
 
-  it("accepts a credential the record holds, in another word order", () => {
+  it("accepts a credential the knowledge base holds, in another word order", () => {
     expect(kinds(resume({ skills: ["Agile delivery (Scrum Product Owner certification)"] }), EDUCATION)).toEqual([]);
     expect(kinds(resume({ executive_summary: "Engineer and Certified Scrum Product Owner.", bullets: [] }), EDUCATION)).toEqual([]);
   });
 
-  it("reports, without blocking, a named tool or acronym the record never mentions", () => {
+  it("reports, without blocking, a named tool or acronym the knowledge base never mentions", () => {
     expect(namedTerms(["Google Maps SDK"])).toEqual(["Maps", "SDK"]);
     expect(namedTerms(["Kafka"])).toEqual(["Kafka"]);
     expect(namedTerms(["Event-driven design", "Fundraising"], false)).toEqual([]);
@@ -156,7 +156,7 @@ describe("credentials, skills and education", () => {
     expect(issues[0].detail).toMatch(/"Kubernetes", "Redis" appears nowhere/);
   });
 
-  it("checks education entries only when the record holds education", () => {
+  it("checks education entries only when the knowledge base holds education", () => {
     const g = resume({ education: [{ institution: "Harrow University", credential: "MBA" }] });
     expect(kinds(g, EDUCATION)).toEqual([]);
     expect(kinds(g, EDUCATION, { educationRecorded: true })).toEqual(["ungrounded_credential"]);
@@ -185,13 +185,13 @@ describe("provenance source labels", () => {
     }
   });
 
-  it("still rejects a source that names nothing in the record", () => {
+  it("still rejects a source that names nothing in the knowledge base", () => {
     expect(kinds(withSource("First Prairie Bank (Integration Engineer)"))).toEqual(["unknown_source"]);
     expect(kinds(withSource("99-nope"))).toEqual(["unknown_source"]);
   });
 });
 
-describe("drift: the record's wording is weaker in kind", () => {
+describe("drift: the knowledge base's wording is weaker in kind", () => {
   const run = (...bullets: string[]) => checkResumeStretch(resume({ bullets }), exps).map((f) => [f.kind, f.trigger]);
 
   it("flags took part becoming led, or the team's verb taken as the candidate's own", () => {
@@ -205,12 +205,12 @@ describe("drift: the record's wording is weaker in kind", () => {
     expect(run("Rolled out per-branch preview environments across the engineering organisation.")).toEqual([["stretch", "rolled"]]);
   });
 
-  it("names the record's own sentence in the finding", () => {
+  it("names the knowledge base's own sentence in the finding", () => {
     const [f] = checkResumeStretch(resume({ bullets: ["Implemented Kafka for the event bus."] }), exps);
     expect(f.detail).toContain("evaluated kafka and a managed queue");
   });
 
-  it("passes when the bullet keeps the record's kind", () => {
+  it("passes when the bullet keeps the knowledge base's kind", () => {
     expect(
       run(
         "Member of the team that moved card authorization to an event-driven service in Go.",
@@ -245,7 +245,7 @@ describe("drift: the record's wording is weaker in kind", () => {
 /**
  * Rules added on 2026-11-13: an employer invented in prose, a true number
  * attached to another result, and the executive summary read sentence by
- * sentence. Two more fictional record entries, with fixed dates.
+ * sentence. Two more fictional knowledge base entries, with fixed dates.
  */
 const ORBIT = `---
 id: orbit-pm
@@ -298,7 +298,7 @@ describe("an employer named in prose", () => {
   const companies = pm.map((e) => e.frontmatter.company);
   const look = (text: string) => proseOrganisations(text, companies, ORBIT + PELICAN, PM_EXTRA).map((o) => [o.name, o.status, o.opening]);
 
-  it("looks each name after \"at\" up in the record: employer, own documents, a verified fact, or nowhere", () => {
+  it("looks each name after \"at\" up in the knowledge base: employer, own documents, a verified fact, or nowhere", () => {
     expect(look("At Orbit Freight, I rebuilt the sign-up flow.")).toEqual([["Orbit Freight", "company", true]]);
     expect(look("Three years at Orbit, then two at Pelican Maps Routing.")).toEqual([
       ["Orbit", "company", false],
@@ -326,14 +326,14 @@ describe("an employer named in prose", () => {
     }
   });
 
-  it("blocks a name the record never mentions, in a bullet and in the summary", () => {
+  it("blocks a name the knowledge base never mentions, in a bullet and in the summary", () => {
     expect(pmKinds(pmResume({ bullets: ["At Quorvex Labs, I built the billing service."] }))).toEqual(["unknown_organisation"]);
     expect(pmKinds(pmResume({ bullets: ["Rebuilt the sign-up flow after two years at Quorvex Labs."] }))).toEqual(["unknown_organisation"]);
     expect(pmKinds(pmResume({ summary: "Product manager in logistics software, previously at Quorvex Labs." }))).toEqual(["unknown_organisation"]);
     expect(ADVISORY_GROUNDING.has("unknown_organisation")).toBe(false);
   });
 
-  it("accepts an employer, a site or a school of the record", () => {
+  it("accepts an employer, a site or a school of the knowledge base", () => {
     expect(
       pmKinds(
         pmResume({
@@ -351,7 +351,7 @@ describe("an employer named in prose", () => {
     expect(pmKinds(pmResume({ bullets: ["At Ridgeway, I led the routing team."] }), { targetCompany: "Ridgeway" })).toEqual(["unknown_organisation"]);
   });
 
-  it("lists a client or a partner of the record given as a place of work", () => {
+  it("lists a client or a partner of the knowledge base given as a place of work", () => {
     expect(pmKinds(pmResume({ bullets: ["At First Prairie Bank, built the payments integration."] }))).toEqual([]);
     expect(pmStretch(pmResume({ bullets: ["At First Prairie Bank, built the payments integration."] }))).toEqual([["Orbit Freight", "organisation", "First Prairie Bank"]]);
     expect(pmStretch(pmResume({ bullets: ["Built the integration with a bank partner, First Prairie Bank."] }))).toEqual([]);
@@ -384,7 +384,7 @@ describe("a true number attached to another result", () => {
     expect(f!.detail).toMatch(/number attached to another result.*Cut onboarding time for new shippers by 40%/);
   });
 
-  it("passes the record's own result, reworded, and leaves a number the employer does not state to grounding", () => {
+  it("passes the knowledge base's own result, reworded, and leaves a number the employer does not state to grounding", () => {
     expect(
       pmStretch(
         pmResume({
@@ -405,7 +405,7 @@ describe("a true number attached to another result", () => {
 describe("the executive summary, sentence by sentence", () => {
   const summary = (text: string, extra = PM_EXTRA) => pmStretch(pmResume({ summary: text }), extra);
 
-  it("gives no finding on sentences the record supports, whichever employer supports them", () => {
+  it("gives no finding on sentences the knowledge base supports, whichever employer supports them", () => {
     expect(
       summary(
         "- **Logistics Product Manager:** Product manager in logistics software. Seven years across Orbit Freight and Pelican Maps.\n" +
@@ -415,7 +415,7 @@ describe("the executive summary, sentence by sentence", () => {
     ).toEqual([]);
   });
 
-  it("reads ownership verbs, absolutes and drift there, against the whole record", () => {
+  it("reads ownership verbs, absolutes and drift there, against the whole knowledge base", () => {
     expect(summary("Spearheaded the pricing strategy for depots.")).toEqual([["Executive summary", "ownership", "spearheaded"]]);
     expect(summary("Launched offline maps in every market.")).toEqual([["Executive summary", "absolute", "every"]]);
     expect(summary("Rebuilt the routing engine.")).toEqual([["Executive summary", "drift", "rebuilt"]]);
@@ -430,12 +430,12 @@ describe("the executive summary, sentence by sentence", () => {
     expect(summary("Launched carrier scorecards in 3 markets.")).toEqual([]);
   });
 
-  it("lists a number of the record attached to another result", () => {
+  it("lists a number of the knowledge base attached to another result", () => {
     expect(summary("Raised revenue by 40%.")).toEqual([["Executive summary", "number", "40%"]]);
   });
 
   it("lists a number of years that no line states and the dates do not give", () => {
-    // Orbit: 4.5 years. Pelican: 2.5 years. The whole record: 7 years.
+    // Orbit: 4.5 years. Pelican: 2.5 years. The whole knowledge base: 7 years.
     expect(summary("Seven years in product management, four at Orbit Freight.")).toEqual([]);
     expect(summary("Four years at Orbit Freight.")).toEqual([]);
     expect(summary("More than five years in logistics software, and 5+ years in product.")).toEqual([]);
@@ -446,7 +446,7 @@ describe("the executive summary, sentence by sentence", () => {
     expect(summary("Ten years in logistics software.", `${PM_EXTRA}\nTen years in logistics, the first three in dispatch. [C]`)).toEqual([]);
   });
 
-  it("lists a count composed across roles, and still blocks a count the record cannot add up to", () => {
+  it("lists a count composed across roles, and still blocks a count the knowledge base cannot add up to", () => {
     const five = pmResume({ summary: "Launched products in five markets." });
     expect(pmKinds(five)).toEqual([]);
     expect(pmStretch(five)).toEqual([["Executive summary", "total", "five markets"]]);
@@ -462,7 +462,7 @@ describe("the executive summary, sentence by sentence", () => {
 describe("drift: the candidate's own part after a colon", () => {
   const run = (...bullets: string[]) => checkResumeStretch(pmResume({ bullets }), pm, PM_EXTRA).map((f) => [f.rule, f.trigger]);
 
-  it("passes the part the record gives the candidate, and still flags the launch taken as their own", () => {
+  it("passes the part the knowledge base gives the candidate, and still flags the launch taken as their own", () => {
     expect(run("Wrote the test plan and ran acceptance sessions with depot staff for the launch of online booking.")).toEqual([]);
     expect(run("Launched online booking for depot staff.")).toEqual([["drift", "launched"]]);
   });
@@ -544,7 +544,7 @@ describe("save path", () => {
     expect(res.stretch.map((f) => f.trigger)).toEqual(["implemented"]);
   });
 
-  it("checks education against the record's education files when there are any", async () => {
+  it("checks education against the knowledge base's education files when there are any", async () => {
     const withEducation = await setup(true);
     const invented = resume({ bullets: ["Built the payouts API for 14,000 merchants."], education: [{ institution: "Harrow University", credential: "MBA" }] });
     await expect(saveGeneratedResume(withEducation.store, withEducation.id, invented)).rejects.toThrow(/ungrounded_credential/);

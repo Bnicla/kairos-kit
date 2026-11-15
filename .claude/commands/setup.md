@@ -1,12 +1,20 @@
 ---
-description: First run. Builds your Kairos record and settings from your documents or an interview. Re-run one part with /setup --section <name>.
+description: "Biographer: First run. One résumé and one job ad are enough to start: a first tailored résumé, then your settings. Re-run one part with /setup --section <name>."
 argument-hint: "[--section <name>]"
 ---
 
-# /setup: the first-run interview
+# /setup: the first run
 
-You are running Kairos's first-run interview for a student or early-career job
-seeker. Arguments: `$ARGUMENTS`
+You are running Kairos's first run for a job seeker: a student, someone early
+in a career, someone changing field, any profession. Arguments: `$ARGUMENTS`
+
+The first run has two halves. The **quick start** comes first: one résumé and
+one job ad are enough, and the student leaves with a tailored résumé. The
+**14 parts** come after, when they choose: every setting, and the questions
+that deepen the knowledge base.
+
+This is the Biographer's work. The quick start also calls for the Assessor's
+score and the Writer's draft.
 
 The student's answers live ONLY in their data folder (`KAIROS_HOME`, default
 `~/Kairos`), written through the `kairos` MCP tools. Never write their answers
@@ -39,7 +47,7 @@ when asked." Then stop.
    the options and which document says what. Wait for the answers. Save nothing
    about a role or school that has an open question.
 4. **Additions and conflicts stay apart.** Items with status `additive` (the
-   record has them; a new document only adds a date, a place or a source) go in
+   knowledge base has them; a new document only adds a date, a place or a source) go in
    their own short list: "These would be added to what you already have:".
    Ask once for approval of the whole list; apply only what they approve.
 5. **Re-runs never overwrite silently.** New files: `save_experience` /
@@ -48,11 +56,14 @@ when asked." Then stop.
    `for_editing: true` first, change only
    the approved parts, keep everything else, then save with the merged
    `sources`. `unchanged` items are not saved again.
-6. After saving experiences, call `rebuild_index`.
-7. **Each save, and each document read, shows a Claude Code confirmation.**
-   Before the first one, tell the student: "Before I read one of your files, and
-   each time I save something to your record, Claude Code shows you the file or
-   the full change. Accept only what is right." A declined save or read is not
+6. A save of a role refreshes the map of the knowledge base by itself. Call
+   `rebuild_index` only after a file was edited by hand.
+7. **Each change to the knowledge base, and each document read, shows a
+   Claude Code confirmation.** Before the first one, tell the student: "Before
+   I read one of your files, and each time I change your knowledge base, Claude
+   Code shows you the file or the full change. Accept only what is right. What
+   I make for one application (the posting, the score, the résumé, a letter,
+   its status) is saved without that step." A declined save or read is not
    retried unless they ask. A role too long for one confirmation is saved in
    two parts.
 8. At the end of each section call `mark_setup_section` with `done`, or with
@@ -63,11 +74,20 @@ when asked." Then stop.
 
 ## Step 0: the data folder and the install
 
-Call `setup_status({ init: true, check_install: true })`.
+Call `create_data_folder` (it creates the data folder when it is missing and
+never writes a file that exists), then `setup_status({ check_install: true })`
+(it reads only).
 
+- On a first run (not with `--section`), say once, before anything else:
+  "Claude is your chief of staff for your job search." Then, in one line each,
+  the three specialists they meet first: the Biographer builds their knowledge
+  base from their résumé, the Assessor scores a job ad against it, the Writer
+  drafts the résumé. Name the other three in one line together (Scout,
+  Networker, Interview Coach: the job search, the people they know at a
+  company, the interview), for later.
 - Say where the data folder is. If it was just created: "I created your data
   folder at <path>. Everything you tell me is saved there, on this computer."
-  If it already holds a record: "You already have a record at <path>. I will add
+  If it already holds a knowledge base: "You already have a knowledge base at <path>. I will add
   to it and ask before changing anything."
 - Install: if `install.warnings` is not empty, read each one out plainly.
   LibreOffice missing is not a problem: say résumés will export as Word files
@@ -75,13 +95,88 @@ Call `setup_status({ init: true, check_install: true })`.
 - If `install.repo.warning` is set (a public fork), read it out and ask the
   student to make the fork private before going further. Continue if they say so.
 - With `--section <name>`: go straight to that section (name or number, listed
-  below), run only it, then do "The end". Otherwise, if `next_section` is not the
-  first section, say which parts are done and continue from `next_section`.
+  below), run only it, then do "The end".
+- The knowledge base has no experiences and there is no `--section`: do the
+  quick start below.
+- Otherwise (the knowledge base has experiences): say which parts are done and
+  continue the 14 parts from `next_section`.
+
+## Quick start: one résumé and one job ad
+
+The aim: a tailored résumé the student can download, with as few steps for
+them as possible. Ask nothing that can wait. The settings keep their defaults
+until the 14 parts.
+
+1. **Ask for the two things in one message.** "Give me your résumé (PDF, Word
+   or text) and one job ad you would apply to (its link, or the text). If you
+   have no résumé, say so: I ask you a few short questions instead." Say once
+   what the confirmations are (rule 7 above). Say once, too, that they can
+   choose "Always allow" in Claude's box for the Kairos tools that only read
+   (loading, showing, getting the evidence), and that every save to their
+   knowledge base still asks each time. Never suggest it for a tool that
+   writes.
+2. **Biographer: the knowledge base from the résumé.** `prepare_extraction`,
+   follow its `system_prompt`. With one document and an empty knowledge base
+   there is nothing to compare: do not call `reconcile_sources`. Save what the
+   résumé says, as it says it, every fact tagged `[R]`, and nothing else, in
+   one call: `save_first_import({ profile: { name, contact_line, headline },
+   experiences: [...], education: [...], sources })`, the headline built from
+   the résumé's own words. The student sees the whole list, every item in
+   full, in one confirmation, and approves it once. Ask no question before
+   it: they read it and decline if something is wrong. If they decline, ask
+   what is wrong, correct it and offer it again. If the tool answers that the
+   list is too long for one confirmation, save one by one instead:
+   `save_profile`, then `save_experience` for each role and `save_education`
+   for each school (`expect_new: true`). After this first import every save
+   to the knowledge base asks by itself. The voice profile, the skills review, the numbers and
+   every setting wait for the 14 parts.
+   **No résumé:** a short interview instead. Ask for the two or three
+   experiences that matter most for the job ad, one at a time: for a student,
+   studies, projects, clubs, part-time work and volunteering count; for someone
+   changing field, the roles closest to the new field. For each: organization,
+   title, start and end month, what they did themselves, one result. Then the
+   schools, in one question. Every fact tagged `[C]`, source
+   `interview <YYYY-MM-DD>`. Same saves.
+3. **Assessor: the score.** `/score` steps 3 to 5 on the job ad (capture,
+   score, save). Report in a few lines: the band and confidence, the two
+   strongest points, the real gaps. If the band is DEVELOPING or WEAK, say so
+   plainly and ask whether to write the résumé anyway or to try another ad.
+   Otherwise go on without asking.
+4. **Writer: the résumé.** `/tailor` steps 2 to 5: write it, save it, render
+   the Word file, check the layout, and say where the file is. Report the
+   coverage counts in one line, then only what needs the student's decision
+   (each stretch item, each line with no origin).
+5. **Biographer: going deeper, for this job.** From the score's gaps that may
+   be missing from the knowledge base and the requirements the résumé does not
+   cover, pick the two or three whose true answer would change this résumé
+   most. Ask them one at a time, plainly, each with the way out: "The ad asks
+   for SQL. Have you used SQL in a job, a project or a class that your résumé
+   does not mention? If not, say no." A yes is saved in their words
+   (`save_confirmed_fact`); a no closes the question. Never rephrase a question
+   to get a yes, and never suggest an answer or a place where it might have
+   happened beyond the three kinds above. After the answers, offer once to
+   write the résumé again with the new facts.
+6. **Close in a few lines.** What exists now (the knowledge base with its
+   roles, one scored job, one résumé). What is thin: the roles that hold only
+   what the résumé said; a short interview about one of them
+   (`/setup --section experience`) gives the Writer more to choose from for the
+   next job. What comes next, their choice: another job (`/score <link>`), the
+   rest of the first run (`/setup` continues with the 14 parts: goals, places,
+   pay, the daily search), or the job search (`/find`).
+
+Do not call `mark_setup_section` in the quick start: no part was gone through
+in full, and `/setup` later starts the 14 parts from the first one, with what
+the quick start saved already in place.
+
+Facts only. The questions of step 5 ask what happened; they never invite the
+student to claim more than is true. There is no score or count to raise: a
+short, true knowledge base is a good one.
 
 ## Step 1: choose a way in
 
-Skip this step when the record already has experiences and the student is
-re-running. Otherwise ask:
+This step and the 14 parts are the full first run, after the quick start or
+with `--section`. Skip this step when the knowledge base already has
+experiences (the quick start, or an earlier run, put them there). Otherwise ask:
 
 "How would you like to start?
  A. Point me to a folder with your documents: résumé, LinkedIn data export, transcripts.
@@ -126,7 +221,7 @@ Each part can be run alone with `/setup --section <name>`. Names in backticks.
 
 ### 1. Identity and contact (`identity`)
 Confirm or ask: full name; contact line (email · phone · city · LinkedIn URL);
-a headline for the top of the résumé (offer one built from their record, e.g.
+a headline for the top of the résumé (offer one built from their knowledge base, e.g.
 "Statistics Graduate, Data Analysis"); languages with level; work authorization
 ("Are you allowed to work in <country> without a visa? Will you need sponsorship
 now or later?").
@@ -269,7 +364,7 @@ run happens at the next wake.
 2. Call `resume_health_check`. Give the overall result and the top three fixes
    in plain words. Offer to fix one now.
 3. Suggest the first commands:
-   - `/find` to run the job search now;
-   - `/score <link>` to check how well one job fits;
-   - `/tailor <link>` to write a résumé for one job;
+   - `/find` to run the job search now (Scout);
+   - `/score <link>` to check how well one job fits (Assessor);
+   - `/tailor <link>` to write a résumé for one job (Writer);
    - `/status` to see the board.

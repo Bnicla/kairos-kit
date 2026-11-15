@@ -1,3 +1,4 @@
+import matter from "@kairos/engine/front-matter";
 import type { Experience } from "@kairos/engine/kb/types";
 import { verifiedFacts } from "@kairos/engine/kb/experience";
 import { contentStems, stretchGuard, summarySentences, SUMMARY } from "@kairos/engine/stretch";
@@ -6,7 +7,7 @@ import type { GeneratedResume, LineOrigin, OriginStrength } from "@kairos/engine
 
 /**
  * Line origins (2026-11-13): for every bullet, role intro and executive-summary
- * sentence of a résumé, the verified fact or facts of the record that the line
+ * sentence of a résumé, the verified fact or facts of the knowledge base that the line
  * comes from. Computed here, in code; the model's `provenance_audit` is only
  * compared with the result. Before this, one audit entry was enough for a
  * save, its claim was not compared with its source, and a bullet needed none.
@@ -16,6 +17,19 @@ import type { GeneratedResume, LineOrigin, OriginStrength } from "@kairos/engine
  * lines are left out, as in the stretch check. A bullet or a role intro is
  * matched to the facts of its own employer; a summary sentence to the facts of
  * any entry.
+ *
+ * Education (2026-11-14). A summary sentence that states the degree used to
+ * find nothing, because the degree is in an education entry and only the
+ * experiences were searched. Each education entry now gives facts for summary
+ * sentences: one line made of its frontmatter (credential, institution,
+ * dates and its other plain values) and each line of its body that is not
+ * tagged [?]. The whole education file is already a source the save accepts
+ * numbers from (ops.ts), so its untagged lines count here too. Education is
+ * consulted only when it makes the origin stronger: the sentence is first
+ * traced against the experiences alone, as before, and that result is kept
+ * unless the trace with education gives a higher strength. So no line is
+ * weaker than it was, and a line gets other facts only through an education
+ * entry. Bullets and role intros are not matched to education.
  *
  * Matching uses the words and numbers the other checks already compare: the
  * content words of the stretch check (`contentStems`: stopwords and numbers
@@ -43,13 +57,13 @@ import type { GeneratedResume, LineOrigin, OriginStrength } from "@kairos/engine
  *  - partial: order of at least 10%, and either overlap of 60% (a number is
  *    missing, or the wording is not followed) or one fact alone holding 40% of
  *    the words. The line was rewritten further, or says more than the facts.
- *  - none: below that. No fact of the record was found for the line.
+ *  - none: below that. No fact of the knowledge base was found for the line.
  * A summary sentence is a composition across roles: it is partial at an
  * overlap of 60% whatever its order (the facts shown are the lines that best
  * support it), and strong by the same rule as a bullet.
  *
  * The shares were set on counts (2026-11-13), on 301 distinct bullets of real
- * résumés written from a record of 159 facts:
+ * résumés written from a knowledge base of 159 facts:
  *  - under their own employer: 89% strong, 11% partial, none without origin;
  *  - under the wrong employer (the best of five): 99% without origin;
  *  - a list of words drawn at random from the other bullets of the same
@@ -59,7 +73,7 @@ import type { GeneratedResume, LineOrigin, OriginStrength } from "@kairos/engine
  *    word) was met by 88% of the bullets under the wrong employer.
  *
  * What an origin is not: proof that the line is true. It says where the words
- * and the numbers of the line are in the record. A line that keeps the record's
+ * and the numbers of the line are in the knowledge base. A line that keeps the knowledge base's
  * words and changes one verb ("took part" to "led") has a strong origin;
  * whether it claims more than the fact says is the stretch check's question.
  *
@@ -106,6 +120,8 @@ export interface LineOriginReport {
 
 interface Fact {
   experience_id: string;
+  /** Set for a fact of an education entry: the name the view gives the entry. */
+  education?: string;
   text: string;
   /** The content words of the fact, in order, each once. */
   seq: string[];
@@ -116,6 +132,40 @@ const asFact = (experience_id: string, text: string): Fact => {
   const seq = contentStems(text);
   return { experience_id, text, seq, stems: new Set(seq) };
 };
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/**
+ * The facts of the education entries (raw files, as loadEducation returns them): for each, one line made of
+ * its frontmatter's plain values, then each body line that is not a heading and not tagged [?].
+ */
+function educationFacts(raws: string[], guard: RegExp): Fact[] {
+  return raws.flatMap((raw) => {
+    let data: Record<string, unknown> = {};
+    let body = raw;
+    try {
+      const parsed = matter(raw);
+      data = (parsed.data ?? {}) as Record<string, unknown>;
+      body = parsed.content;
+    } catch {
+      // unreadable frontmatter: the body alone
+    }
+    const plain = (v: unknown): string[] => (typeof v === "string" || typeof v === "number" ? [String(v).trim()] : Array.isArray(v) ? v.flatMap(plain) : []);
+    const name = plain(data.institution)[0] || plain(data.credential)[0] || "education";
+    const head = Object.entries(data)
+      .filter(([k]) => !["sources", "id", "prov"].includes(k))
+      .flatMap(([, v]) => plain(v))
+      .filter(Boolean)
+      .join(", ");
+    const lines = body
+      .split("\n")
+      .map((l) => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").replace(/\s+/g, " ").trim())
+      .filter((l) => l && !l.startsWith("#") && !/\[\?\]/.test(l) && !guard.test(l.split(/(?<=[.;])\s+/)[0] ?? ""));
+    return [head, ...lines].filter(Boolean).map((text) => ({ ...asFact(`education:${slug(name)}`, text), education: name }));
+  });
+}
+
+const RANK: Record<OriginStrength, number> = { none: 0, partial: 1, strong: 2 };
 
 const idOf = (e: Experience) => String(e.frontmatter.id ?? "").trim() || e.fileName.replace(/\.md$/, "");
 
@@ -215,13 +265,26 @@ const byCompanyOf = (experiences: Experience[]) => {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The origin of every line of a résumé, in reading order: summary sentences, then each role's intro and bullets. */
-export function computeLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string } = {}): LineOrigin[] {
+export function computeLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string; education?: string[] } = {}): LineOrigin[] {
   const guard = stretchGuard(opts.candidateName);
   const byCompany = byCompanyOf(experiences);
   const all = factsOf(experiences, guard);
+  const education = educationFacts(opts.education ?? [], guard);
   const line = (position: Pick<LineOrigin, "kind" | "role" | "bullet" | "sentence">, text: string, facts: Fact[]): LineOrigin => {
-    const t = trace(text, facts, { composed: position.kind === "summary" });
-    return { ...position, text, strength: t.strength, overlap: round2(t.overlap), facts: t.facts.map((f) => ({ experience_id: f.experience_id, fact: f.text })) };
+    const composed = position.kind === "summary";
+    let t = trace(text, facts, { composed });
+    // A summary sentence may state the degree: the education entries are consulted, and kept only when the origin is stronger with them.
+    if (composed && education.length && t.strength !== "strong") {
+      const withEducation = trace(text, [...facts, ...education], { composed });
+      if (RANK[withEducation.strength] > RANK[t.strength]) t = withEducation;
+    }
+    return {
+      ...position,
+      text,
+      strength: t.strength,
+      overlap: round2(t.overlap),
+      facts: t.facts.map((f) => ({ experience_id: f.experience_id, fact: f.text, ...(f.education ? { education: f.education } : {}) })),
+    };
   };
   const out: LineOrigin[] = summarySentences(gen.resume.executive_summary ?? "").map((s, i) => line({ kind: "summary", sentence: i }, s, all));
   (gen.resume.experience ?? []).forEach((exp, role) => {
@@ -245,7 +308,7 @@ const clip = (s: string, n = 110) => {
 /**
  * The origins, and what the user decides on:
  *  - a line with no origin: confirm the fact it rests on (it is then saved to
- *    the record and found on the next save), reword it closer to the record,
+ *    the knowledge base and found on the next save), reword it closer to the knowledge base,
  *    or drop it;
  *  - a provenance_audit entry whose named source holds no fact for the line
  *    its claim is about, while another entry does. The claim is matched to a
@@ -253,7 +316,7 @@ const clip = (s: string, n = 110) => {
  *    its numbers); an entry whose claim matches no line, or that names the
  *    profile or the education record, is not compared.
  */
-export function checkLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string } = {}): LineOriginReport {
+export function checkLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string; education?: string[] } = {}): LineOriginReport {
   const guard = stretchGuard(opts.candidateName);
   const lines = computeLineOrigins(gen, experiences, opts);
   const companyOf = (l: LineOrigin) => (l.kind === "summary" ? SUMMARY : (gen.resume.experience[l.role!]?.company ?? ""));
@@ -266,8 +329,8 @@ export function checkLineOrigins(gen: GeneratedResume, experiences: Experience[]
       line: l.text,
       detail:
         l.kind === "summary"
-          ? "no verified fact of the record was found for this sentence"
-          : `no verified fact of the ${companyOf(l)} record was found for this line`,
+          ? "no verified fact of the knowledge base was found for this sentence"
+          : `no verified fact under ${companyOf(l)} in the knowledge base was found for this line`,
     }));
 
   const asFacts: Fact[] = lines.map((l, i) => asFact(String(i), l.text));
@@ -319,9 +382,9 @@ const KINDS = new Set<unknown>(["bullet", "role_intro", "summary"]);
 /**
  * The origins of a résumé read back from `resume.json`: those the save
  * recorded (`saved: true`; malformed entries are skipped), or, for a résumé
- * saved before 2026-11-13, computed now against the record as it is today.
+ * saved before 2026-11-13, computed now against the knowledge base as it is today.
  */
-export function readLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string } = {}): { lines: LineOrigin[]; saved: boolean } {
+export function readLineOrigins(gen: GeneratedResume, experiences: Experience[], opts: { candidateName?: string; education?: string[] } = {}): { lines: LineOrigin[]; saved: boolean } {
   if (Array.isArray(gen.line_origins)) {
     const lines = gen.line_origins.filter(
       (l): l is LineOrigin => !!l && KINDS.has(l.kind) && STRENGTHS.has(l.strength) && typeof l.text === "string" && Array.isArray(l.facts) && l.facts.every((f) => !!f && typeof f.fact === "string"),

@@ -13,6 +13,8 @@
  */
 
 import type { Store } from "@kairos/engine/store/types";
+import { sanitizeField } from "./posting-guard";
+import { readTextCapped } from "./safe-fetch";
 
 export type FormQuestionKind =
   | "text"
@@ -113,9 +115,11 @@ export function normalizeGreenhouseForm(
     const field = q.fields?.[0];
     if (!q.label || !field || field.type === "input_hidden") continue;
     const kind = KIND_BY_TYPE[field.type ?? ""] ?? "unknown";
-    const options = field.values?.map((v) => v.label ?? "").filter(Boolean);
+    // A form's wording is the employer's text, like the posting: invisible characters out, length capped,
+    // and a label or option that reads like an instruction to an assistant replaced by a marker.
+    const options = field.values?.map((v) => sanitizeField(v.label ?? "", 200).value).filter(Boolean);
     questions.push({
-      label: q.label.trim(),
+      label: sanitizeField(q.label, 500).value,
       required: q.required !== false,
       kind,
       custom: !STANDARD_FIELDS.has(field.name ?? ""),
@@ -146,7 +150,7 @@ export async function fetchGreenhouseForm(url: string): Promise<ApplicationForm 
       },
     );
     if (!res.ok) return null;
-    return normalizeGreenhouseForm(await res.json(), ref);
+    return normalizeGreenhouseForm(JSON.parse(await readTextCapped(res)), ref);
   } catch {
     return null;
   }

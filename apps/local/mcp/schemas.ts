@@ -53,6 +53,24 @@ export const saveProfileShape = {
     .string()
     .optional()
     .describe("appId of the standing generic résumé that tailor-resume clones when a spec names no base"),
+  referrals: z
+    .object({
+      enabled: z.boolean().optional().describe("false: contacts at a company are never shown unasked"),
+      min_band: z
+        .enum(["STRONG", "COMPETITIVE", "DEVELOPING", "WEAK"])
+        .optional()
+        .describe("Lowest score band at which the user's contacts at the company are shown as possible referrals. Omit for COMPETITIVE"),
+      min_confidence: z
+        .enum(["high", "medium", "low"])
+        .optional()
+        .describe("Lowest score confidence at which they are shown. Omit for high"),
+      after_applying: z
+        .boolean()
+        .optional()
+        .describe("true: keep showing them after the application is sent. Omit or false: only while the application is not sent yet"),
+    })
+    .optional()
+    .describe("When Kairos shows the people the user knows at a company (after import_linkedin_connections)"),
   voice: z
     .object({
       banned_patterns: z
@@ -159,7 +177,7 @@ export const saveAutofillShape = {
     )
     .optional()
     .describe(
-      "How record roles appear on application forms, keyed by experience id: the user's own decisions (HR title, exact months as MM/YYYY, current or ended, exclude). Merged id by id; an id maps to its whole override.",
+      "How the knowledge base's roles appear on application forms, keyed by experience id: the user's own decisions (HR title, exact months as MM/YYYY, current or ended, exclude). Merged id by id; an id maps to its whole override.",
     ),
   mode: z.enum(["merge", "replace"]).optional().describe("merge (default): each object is merged key by key; replace: rewrite the file"),
 };

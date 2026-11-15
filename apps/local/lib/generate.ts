@@ -1,5 +1,5 @@
 import "server-only";
-import matter from "gray-matter";
+import matter from "@kairos/engine/front-matter";
 import { runClaude } from "@/lib/claude-cli";
 import { getStore } from "@/store";
 import {
@@ -225,7 +225,7 @@ export async function generateCoverLetterHeadless(appId: string): Promise<{ ok: 
     const numbers = await checkLetterNumbers(store, appId, markdown);
     if (!numbers.message) break;
     if (attempt === 2) return { ok: false, error: `Letter failed the number check after 3 attempts. ${numbers.message}` };
-    prompt = `${prompt}\n\nYour draft:\n${markdown}\n\nIt failed the number check: ${numbers.message}\nRewrite it without those numbers (never replace one with another number that is not in the record). Return ONLY the letter.`;
+    prompt = `${prompt}\n\nYour draft:\n${markdown}\n\nIt failed the number check: ${numbers.message}\nRewrite it without those numbers (never replace one with another number that is not in the knowledge base). Return ONLY the letter.`;
   }
 
   await store.writeFile(["applications", appId, "cover-letter.md"], markdown);

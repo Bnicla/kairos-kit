@@ -39,6 +39,12 @@ export interface SweepInput {
   registry: RegistryEntry[];
   /** Boards derived from the user's own applications — always swept first. */
   extraBoards?: RegistryEntry[];
+  /**
+   * Postings that were already read from the boards, with the counts of that reading (the shared
+   * daily list of the hosted connector). When given, no board is asked and `registry` is not used:
+   * the sweep starts at the filter. Absent: the boards are fetched, as always.
+   */
+  fetched?: { postings: Posting[]; stats: FetchStats; boards: number };
   profile: SearchProfile;
   /** URLs to drop: previously seen/dismissed + already-tracked applications. */
   seenUrls: Set<string>;
@@ -295,6 +301,12 @@ export interface FetchBoardsInput {
   perAtsConcurrency?: SweepInput["perAtsConcurrency"];
   fetchOptions?: FetchOptions;
   onProgress?: (done: number, total: number, postings: number) => void;
+  /**
+   * Called once per board with its outcome, for a caller that needs to know which boards
+   * answered (the shared daily list keeps a board's rows of the day before when it failed).
+   * Absent: nothing changes.
+   */
+  onBoard?: (entry: RegistryEntry, outcome: "ok" | "partial" | FetchFailureKind) => void;
 }
 
 /**
@@ -353,6 +365,7 @@ export async function fetchBoards(input: FetchBoardsInput): Promise<{ postings: 
           const { postings, failure, partial } = await fetchBoardDetailed(entry, undefined, input.fetchOptions);
           all.push(...postings);
           account(ats, failure, partial);
+          input.onBoard?.(entry, failure ? failure.kind : partial ? "partial" : "ok");
           done++;
           if (done % 100 === 0) input.onProgress?.(done, input.boards.length, all.length);
         }
@@ -380,13 +393,15 @@ export async function runSourcingSweep(input: SweepInput): Promise<SweepResultFi
   for (const warning of searchProfileWarnings(input.profile)) input.onLog?.(warning);
   const fetchOptions = sweepFetchOptions(input.profile, input.deepScan);
   const worthLocation = fetchOptions.resolveLocationFor!;
-  const { postings: all, stats } = await fetchBoards({
-    boards,
-    concurrency,
-    perAtsConcurrency: input.perAtsConcurrency,
-    fetchOptions,
-    onProgress: input.onProgress,
-  });
+  const { postings: all, stats } = input.fetched
+    ? input.fetched
+    : await fetchBoards({
+        boards,
+        concurrency,
+        perAtsConcurrency: input.perAtsConcurrency,
+        fetchOptions,
+        onProgress: input.onProgress,
+      });
   for (const p of all) input.liveUrls?.add(postingKey(p.url));
 
   const hardFailures = stats.boards_failed + stats.rate_limited;
@@ -560,7 +575,7 @@ export async function runSourcingSweep(input: SweepInput): Promise<SweepResultFi
     version: 1,
     mode: input.deepScan ? "deep" : "daily",
     ran_at: (input.now ?? (() => new Date().toISOString()))(),
-    boards_swept: boards.length,
+    boards_swept: input.fetched ? input.fetched.boards : boards.length,
     postings_fetched: all.length,
     prefilter_matches: survivors.length,
     prefilter_stretch: stretch.length,

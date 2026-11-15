@@ -1,4 +1,4 @@
-import matter from "gray-matter";
+import matter from "../front-matter";
 import type {
   Experience,
   ExperienceFrontmatter,
@@ -171,7 +171,7 @@ export interface VerifiedFact {
   line: number;
   /** Heading the fact sits under, or null. */
   section: string | null;
-  /** The fact as the record writes it, tag included. */
+  /** The fact as the knowledge base writes it, tag included. */
   text: string;
 }
 
