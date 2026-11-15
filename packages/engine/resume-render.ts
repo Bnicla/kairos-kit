@@ -23,12 +23,27 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
   if (r.executive_summary) {
     lines.push("## Executive Summary", "", r.executive_summary, "");
   }
-  lines.push("## Professional Experience", "");
+  // The person's own projects stand under "Projects", each headed by its name: a project has no employer and,
+  // unless the person stated one, no title. Which rows are projects is the knowledge base's to say (the save sets `kind`).
+  const roles = r.experience.filter((e) => e.kind !== "project");
+  const projects = r.experience.filter((e) => e.kind === "project");
+  const education: string[] = [];
+  if (r.education?.length) {
+    education.push("## Education", "");
+    for (const ed of r.education) {
+      // A certificate whose issuer the person did not name is written with none.
+      education.push(`- **${ed.credential}**${ed.institution?.trim() ? `, ${ed.institution.trim()}` : ""}${ed.dates ? ` (${ed.dates})` : ""}`);
+    }
+    education.push("");
+  }
+  // A student or a recent graduate: the degree is the latest entry, and it stands first (decided by the save).
+  if (r.education_first) lines.push(...education);
+  if (roles.length) lines.push("## Professional Experience", "");
   // Group consecutive roles at the same company under one company header, so
   // career progression at one employer reads as nested roles (matches a
   // company-centric resume layout). "### Company | Location" then "#### Role | Dates".
   let lastCompany: string | null = null;
-  for (const exp of r.experience) {
+  for (const exp of roles) {
     // A flagged role starts a new page: emit a sentinel the docx renderer turns
     // into a real page break before this role's heading (company or role line).
     if ((exp as { page_break_before?: boolean }).page_break_before) {
@@ -44,13 +59,20 @@ export function generatedResumeToMarkdown(gen: GeneratedResume): string {
     for (const b of exp.bullets) lines.push(`- ${b}`);
     lines.push("");
   }
-  if (r.education?.length) {
-    lines.push("## Education", "");
-    for (const ed of r.education) {
-      lines.push(`- **${ed.credential}**, ${ed.institution}${ed.dates ? ` (${ed.dates})` : ""}`);
+  if (projects.length) {
+    lines.push("## Projects", "");
+    for (const p of projects) {
+      const title = p.title?.trim() && !/^project$/i.test(p.title.trim()) ? p.title.trim() : "";
+      // "### Name | Dates": the name where an employer's would be, the dates where a place would be.
+      lines.push(`### ${p.company}${!title && p.dates ? ` | ${p.dates}` : ""}`);
+      if (title) lines.push(`#### ${title}${p.dates ? ` | ${p.dates}` : ""}`);
+      if (p.summary) lines.push("", p.summary);
+      lines.push("");
+      for (const b of p.bullets) lines.push(`- ${b}`);
+      lines.push("");
     }
-    lines.push("");
   }
+  if (!r.education_first) lines.push(...education);
   if (r.skills?.length) {
     lines.push("## Skills", "", r.skills.join(" · "), "");
   }
@@ -99,7 +121,7 @@ export function generatedResumeToHtml(
       ? `<section><h2>Education</h2><ul>${r.education
           .map(
             (ed) =>
-              `<li><strong>${esc(ed.credential)}</strong>, ${esc(ed.institution)}${
+              `<li><strong>${esc(ed.credential)}</strong>${ed.institution?.trim() ? `, ${esc(ed.institution)}` : ""}${
                 ed.dates ? ` (${esc(normalizeDateRangeDashes(ed.dates))})` : ""
               }</li>`,
           )

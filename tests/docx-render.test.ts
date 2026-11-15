@@ -53,13 +53,24 @@ describe("paper size", () => {
   });
 });
 
-const exp = (start: string, end: string): Experience =>
-  ({ fileName: "x.md", frontmatter: { id: "x", company: "C", title: "T", start, end }, body: "" }) as unknown as Experience;
+const exp = (start: string, end: string, body = ""): Experience =>
+  ({ fileName: "x.md", frontmatter: { id: "x", company: "C", title: "T", start, end }, body }) as unknown as Experience;
+/** A body of about `words` words of verified facts. */
+const facts = (words: number) => Array.from({ length: Math.ceil(words / 10) }, (_, i) => `- Built the weekly report number ${i} for the finance team. [R]`).join("\n");
 
 describe("resumeLengthPolicy (DEC-9)", () => {
   it("targets 1 page for early career, 2 for senior", () => {
     expect(resumeLengthPolicy([exp("2023", "present")], { nowYear: 2026 }).targetPages).toBe(1);
-    expect(resumeLengthPolicy([exp("2010", "2012"), exp("2012", "present")], { nowYear: 2026 }).targetPages).toBe(2);
+    expect(resumeLengthPolicy([exp("2010", "2012", facts(900)), exp("2012", "present", facts(900))], { nowYear: 2026 }).targetPages).toBe(2);
+  });
+
+  it("asks for two pages only of a knowledge base that holds enough to fill them: years alone do not", () => {
+    // Sixteen years of work and a few hundred words read from one résumé: one page, and nothing to fill.
+    const short = resumeLengthPolicy([exp("2010", "2012", facts(150)), exp("2012", "present", facts(150))], { nowYear: 2026 });
+    expect(short.targetPages).toBe(1);
+    expect(short.derivation).toMatch(/^16 years of experience, and a knowledge base of \d+ words: one page \(two pages need about 1600 words of facts\)$/);
+    // Lines with no tag are not facts and do not count.
+    expect(resumeLengthPolicy([exp("2010", "present", Array.from({ length: 300 }, () => "- A line nobody tagged, of ten words or so, here.").join("\n"))], { nowYear: 2026 }).targetPages).toBe(1);
   });
 
   it("honors a user override", () => {

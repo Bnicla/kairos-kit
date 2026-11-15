@@ -4,6 +4,7 @@ import { serializeExperience, stripUnverified } from "@kairos/engine/kb/experien
 import { BANNED_WORDS } from "@kairos/engine/prompts/voice";
 import type { GeneratedResume, RequirementCoverageRow } from "@kairos/engine/types";
 import { DEFAULT_ALLOWED_METRIC_STATUSES, registerEntries, type MetricStatus } from "@kairos/engine/metrics-register";
+import { checkYears, dateAsYears, yearClaims } from "@kairos/engine/tools/years";
 
 /**
  * Deterministic quality gates for generated résumés. These run at SAVE time in
@@ -17,7 +18,7 @@ import { DEFAULT_ALLOWED_METRIC_STATUSES, registerEntries, type MetricStatus } f
 // --- Style ------------------------------------------------------------------
 
 export interface StyleViolation {
-  rule: "em-dash" | "not-just-but" | "banned-word" | "empty-adverb" | "verb-clustering" | "leadin-not-title" | "third-person" | "names-kb";
+  rule: "em-dash" | "not-just-but" | "banned-word" | "empty-adverb" | "verb-clustering" | "leadin-not-title" | "third-person" | "first-person" | "verb-form" | "names-kb";
   detail: string;
 }
 
@@ -140,6 +141,12 @@ export function checkStyle(text: string, policy: StylePolicy = DEFAULT_STYLE_POL
  */
 export function checkResumePerson(text: string): StyleViolation[] {
   const out: StyleViolation[] = [];
+  // "where I built", "trained my shift": a résumé names no "I" (seen in a summary line, 15 November 2026).
+  // "Phase I", "Type I" and the like are numerals, not the pronoun.
+  // Addresses and links are not prose ("about.me/…").
+  const prose = text.replace(/\S*[@/.]\S*\w/g, " ");
+  const first = [...prose.matchAll(/\b(I|my|myself|me)\b/g)].filter((m) => m[1] !== "I" || !/\b(?:Phase|Type|Series|Class|Tier|Level|Part|Title|Stage|Grade|Category|Schedule|Division|Volume|Mark|Round|Section|Appendix|World War)\s+$/i.test(prose.slice(Math.max(0, m.index! - 14), m.index!)));
+  if (first.length) out.push({ rule: "first-person", detail: `${[...new Set(first.map((m) => m[1]))].join(", ")} (résumés use implied first person: "Built…", not "I built…")` });
   const hits = text.match(/\b(himself|herself|he|she|his|him)\b/gi);
   if (hits) out.push({ rule: "third-person", detail: `${[...new Set(hits.map((h) => h.toLowerCase()))].join(", ")} (résumés use implied first person)` });
   // The personal knowledge base is never named on an outside-facing document
@@ -148,8 +155,38 @@ export function checkResumePerson(text: string): StyleViolation[] {
   return out;
 }
 
-export const isHardStyleViolation = (v: StyleViolation) =>
-  v.rule !== "empty-adverb" && v.rule !== "verb-clustering";
+// "first-person" and "verb-form" are findings, not stops: the Writer puts them right, and a person who wants "I" on
+// their résumé keeps it (the owner's decision of 15 November 2026).
+export const isHardStyleViolation = (v: StyleViolation) => v.rule !== "empty-adverb" && v.rule !== "verb-clustering" && v.rule !== "first-person" && v.rule !== "verb-form";
+
+const OPENING_VERBS = new Set(
+  (
+    "build run manage lead own write train hire schedule serve mentor hold drive design develop deliver create analyze analyse prepare produce support maintain " +
+    "coordinate oversee direct handle track report present plan organize operate implement improve reduce increase grow launch ship test review teach advise partner " +
+    "work help keep make take bring sell negotiate research conduct perform monitor ensure define establish execute facilitate guide coach supervise process resolve " +
+    "respond load unload pick pack audit forecast budget model calculate reconcile draft edit publish translate collaborate communicate contribute participate assist " +
+    "provide use apply automate migrate deploy configure install integrate document evaluate assess identify investigate recommend propose source recruit onboard " +
+    "administer answer assemble collect compile complete enter file inspect repair stock order receive supply teach tutor grade cover staff"
+  ).split(" "),
+);
+
+/**
+ * Lines that open on a verb in the third person ("Builds the forecast", "Mentors two analysts"). A résumé's lines are
+ * in the implied first person: "Build", "Mentor" for what is still done, "Built" for what is finished. One role of the
+ * run on other professions had "Own…", "Builds…" and "Rebuilt…" (15 November 2026).
+ */
+export function thirdPersonOpenings(gen: GeneratedResume): string[] {
+  const lines = [...gen.resume.executive_summary.split("\n"), ...gen.resume.experience.flatMap((e) => [e.summary ?? "", ...e.bullets])];
+  const out: string[] = [];
+  for (const line of lines) {
+    const first = /^[\s\-*•]*(?:\*\*[^*]*\*\*\s*)?([A-Za-z]+)/.exec(line)?.[1];
+    if (!first || !/^[A-Z][a-z]+s$/.test(first) || /ss$/.test(first)) continue;
+    const w = first.toLowerCase();
+    const base = w.endsWith("ies") ? `${w.slice(0, -3)}y` : OPENING_VERBS.has(w.slice(0, -1)) ? w.slice(0, -1) : w.slice(0, -2);
+    if (OPENING_VERBS.has(base)) out.push(first);
+  }
+  return [...new Set(out)];
+}
 
 // --- ATS coverage -----------------------------------------------------------
 
@@ -210,6 +247,7 @@ export function checkAtsCoverage(jobText: string, resumeText: string): AtsCovera
 
 // --- Grounding (anti-fabrication, mechanical) --------------------------------
 
+
 export interface GroundingIssue {
   kind:
     | "unknown_employer"
@@ -220,12 +258,172 @@ export interface GroundingIssue {
     | "count_source_mismatch"
     | "ungrounded_credential"
     | "ungrounded_skill"
-    | "unknown_organisation";
+    | "unknown_organisation"
+    /** A title under an employer that the knowledge base's entry for that employer does not hold. */
+    | "unknown_title"
+    /** A skills item that is neither in the person's own list nor in the words of a verified fact. */
+    | "skill_not_held"
+    /** A count of years longer than the dates of the roles it is said of. */
+    | "years_exceed_dates"
+    /** A count of years worked out from dates, stated nowhere in the knowledge base: listed for the person. */
+    | "years_from_dates"
+    /** A count of years in the summary that is not the one the person states of themselves. */
+    | "years_not_the_persons"
+    /** A role's dates that are not the knowledge base's for that entry; a year of an education row its entry does not hold. */
+    | "dates_differ"
+    /** A statement of what the person did not do, printed as a line of the résumé. */
+    | "negative_statement"
+    /** An audience ("presented to leadership") that no verified fact of the role names. */
+    | "unknown_audience"
+    /** A skill the person lists and the job ad names, left out of the Skills section: listed for the Writer. */
+    | "listed_skill_left_out"
+    /** A count in the summary that stands on no line and that the roles could add up to. */
+    | "composed_total"
+    /** An education row with no entry to stand on, or an issuer given where the entry names none. */
+    | "education_differs";
   detail: string;
+  /** The line of the résumé the finding is about, when it is about one. */
+  line?: string;
+  /**
+   * What the finding is about, in a form that is the same on every résumé ("dates|acme|2022-present",
+   * "skills|event driven design"): a choice the user makes once is remembered under it (profile `resume_choices`).
+   */
+  key?: string;
 }
 
 /** Findings the candidate decides on (reported as warnings); every other kind blocks the save. */
-export const ADVISORY_GROUNDING: ReadonlySet<GroundingIssue["kind"]> = new Set(["ungrounded_skill"]);
+/**
+ * Findings that do not stop the save. The owner's decision of 15 November 2026: "the guardrails have to be suggestion
+ * but not blocking. At the end of the day it is the user responsibility how they want to represent themselves."
+ * Every check added that day is one of these: the save succeeds, the Writer puts right what it added itself, and
+ * what the user wants kept is told to them and saved (tools/ops.ts). What stopped a save before that day still
+ * does: an employer or an organisation the knowledge base does not know, a number or a count on no line of it, a
+ * credential it does not hold, a source that names no entry.
+ */
+export const ADVISORY_GROUNDING: ReadonlySet<GroundingIssue["kind"]> = new Set([
+  "ungrounded_skill",
+  "skill_not_held",
+  "listed_skill_left_out",
+  "unknown_title",
+  "dates_differ",
+  "years_exceed_dates",
+  "years_not_the_persons",
+  "years_from_dates",
+  "negative_statement",
+  "unknown_audience",
+  "composed_total",
+  "education_differs",
+]);
+
+/** A text as a key: lower case, letters and digits, one space between words, cut short. */
+export const keyOf = (...parts: string[]) => parts.map((t) => t.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}+#%$]+/gu, " ").trim().slice(0, 80)).join("|");
+
+/** An education or credential entry of the knowledge base, as the checks read it. */
+export interface EducationRef {
+  fileName: string;
+  /** The school or the issuer, when the entry names one. */
+  institution?: string;
+  credential?: string;
+  /** The whole entry: its fields and its lines. */
+  text: string;
+}
+
+/** The entries read from the raw files `loadEducation` returns, with the file names `loadEducationEntries` gives. */
+export function educationRef(fileName: string, frontmatter: Record<string, unknown>, body: string): EducationRef {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  return { fileName, institution: str(frontmatter.institution), credential: str(frontmatter.credential), text: [...Object.values(frontmatter).map((v) => (typeof v === "string" || typeof v === "number" ? String(v) : "")), body].join("\n") };
+}
+
+const flatWords = (t: string) => ` ${t.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, " ").trim()} `;
+
+interface DatePoint {
+  year: number;
+  month: number | null;
+  present: boolean;
+}
+const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const SEASONS: Record<string, number> = { spring: 3, summer: 6, fall: 9, autumn: 9, winter: 12 };
+
+/** A start or an end as the knowledge base writes it ("2022-03", "2020", "present"); null when it cannot be read. */
+function datePoint(value: unknown, end: boolean): DatePoint | null {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (/^(present|current|now|today|ongoing)$/.test(s)) return end ? { year: 0, month: null, present: true } : null;
+  const y = dateAsYears(s, false, new Date(0));
+  if (y === null) return null;
+  const month = /^\d{4}$/.test(s) ? null : Math.round((y - Math.floor(y)) * 12) + 1;
+  return { year: Math.floor(y), month, present: false };
+}
+
+/** The first and the last date of a résumé row's dates ("Mar 2022 - Present", "2018 - 2022", "Spring 2025", "2024"). */
+export function rowDates(dates: string): { start: DatePoint; end: DatePoint } | null {
+  const points: DatePoint[] = [];
+  for (const m of dates.toLowerCase().matchAll(/(?:\b([a-z]{3,9})\.?\s+)?\b((?:19|20)\d{2})\b|\b(present|current|now|today|ongoing)\b/g)) {
+    if (m[3]) points.push({ year: 0, month: null, present: true });
+    else {
+      const word = m[1] ?? "";
+      const month = MONTH_NAMES.indexOf(word.slice(0, 3)) >= 0 && !(word in SEASONS) ? MONTH_NAMES.indexOf(word.slice(0, 3)) + 1 : null;
+      points.push({ year: Number(m[2]), month, present: false });
+    }
+  }
+  if (!points.length || points[0]!.present) return null;
+  return { start: points[0]!, end: points[points.length - 1]! };
+}
+
+/**
+ * What the person did not do, said of themselves: the clause opens on the negation ("; did not lead the deal", "I did
+ * not work on it", "but never managed a budget"). Not a result ("410 days without an injury", "with no downtime"), and
+ * not a statement about something else ("so the report is not built by hand").
+ */
+const NEGATIVE =
+  /(?:^|[.;,:(]\s*|\b(?:and|but|though|although|while)\s+)(?:I\s+)?(?:(?:did|do|was|am|have|had)\s+not|didn't|don't|wasn't|haven't|hadn't|never)\s+(?:[a-z]+)|\bnot\s+(?:responsible for|involved in|part of|the lead)\b|\bno\s+(?:direct|formal)\s+(?:reports?|responsibility|ownership|authority)\b/i;
+
+const AUDIENCE_VERB = /\b(?:present|report|brief|pitch|demonstrat|demo|recommend|escalat|communicat|explain|show|deliver)(?:e|ed|s|es|ing|ted|ting|ned|ning)?\b[^.;:!?]{0,80}?\bto\s+((?:(?:the|a|an|its|their|senior|executive|company|division|plant|site|regional|global|client|c)\s+|-)*[a-z][a-z-]*)/gi;
+const AUDIENCES = new Set("leadership executives executive management board ceo cfo coo cto cio vp vps directors director stakeholders investors clients client customers customer partners regulators committee suite managers manager leaders".split(" "));
+
+/**
+ * Audiences a line gives to something the person presented or reported ("presented it to leadership") that the
+ * evidence given does not name. Only the plain words for an audience are read; a name ("the division CFO") is held
+ * by the organisation and title checks.
+ */
+export function unknownAudiences(line: string, evidence: string): string[] {
+  const held = wordSet(evidence);
+  const out: string[] = [];
+  for (const m of line.matchAll(AUDIENCE_VERB)) {
+    const phrase = m[1]!.trim();
+    const head = phrase.split(/[\s-]+/).pop()!.toLowerCase();
+    if (!AUDIENCES.has(head)) continue;
+    const [stemmed] = [...wordSet(head)];
+    if (stemmed && !held.has(stemmed) && !held.has(head)) out.push(`to ${phrase}`);
+  }
+  return [...new Set(out)];
+}
+
+/** Whether a source label names an education or credential entry: by its file name, its school or issuer, or its credential. */
+export function namesEducation(label: string, education: EducationRef[]): boolean {
+  const ref = label.replace(/\.md\b/, "").trim().toLowerCase();
+  if (!ref) return false;
+  const names = education.flatMap((e) => [e.fileName.replace(/\.md$/, ""), e.institution ?? "", e.credential ?? ""]).map((n) => n.toLowerCase().trim()).filter(Boolean);
+  if (names.includes(ref)) return true;
+  const head = ref.split(/\s*(?:\(|\[|—|–|\s-\s|:|,|\||\/)/)[0]!.trim();
+  if (head && names.includes(head)) return true;
+  return names.some((name) => name.length >= 3 && ref.startsWith(name) && !/[a-z0-9]/.test(ref[name.length] ?? ""));
+}
+
+/**
+ * Whether the knowledge base holds this title for one of the entries given (the entries of one employer):
+ * the entry's own title, a shortening of it ("Teaching Assistant" for "Teaching Assistant, Data Structures"),
+ * or a title one of its verified lines states in these words.
+ */
+export function titleHeld(title: string, entries: Experience[], own = ""): boolean {
+  const wanted = flatWords(title);
+  if (!wanted.trim()) return true;
+  // A title the person wrote themselves, in their profile or their own résumé, is theirs under any entry.
+  if (own && own.split("\n").some((line) => flatWords(line).includes(wanted))) return true;
+  return entries.some((e) => {
+    const stripped = stripUnverified(e);
+    return [String(e.frontmatter.title ?? ""), ...stripped.body.split("\n")].some((line) => flatWords(line).includes(wanted));
+  });
+}
 
 /**
  * Mechanically verify a generated résumé against the verified KB evidence:
@@ -264,6 +462,18 @@ export function checkResumeGrounding(
     educationRecorded?: boolean;
     /** The company the résumé is written for. Naming it inside a sentence ("the design team at Acme") is not a claim to have worked there. */
     targetCompany?: string;
+    /** The education and credential entries: a line may name one as its source, and a résumé's education row is held against the entry it names. */
+    educationEntries?: EducationRef[];
+    /** The person's own list of skills (profile `skills`) and the job ad's text: a listed skill the ad names and the Skills section lacks is listed. */
+    statedSkills?: string[];
+    jobText?: string;
+    /** Today, for a role that is still held (tests give a fixed day). */
+    now?: Date;
+    /**
+     * The person's own curated writing beyond `extraCorpus` (their reference résumé, their summary blocks): a title or a
+     * count of years they wrote there themselves is theirs.
+     */
+    ownWriting?: string;
   } = {},
 ): GroundingIssue[] {
   const issues: GroundingIssue[] = [];
@@ -282,9 +492,59 @@ export function checkResumeGrounding(
   const corpus = [...strippedByCompany.values()].join("\n") + "\n" + extra;
 
   for (const exp of gen.resume.experience) {
-    if (!companies.has(exp.company.toLowerCase().trim())) {
+    const key = exp.company.toLowerCase().trim();
+    if (!companies.has(key)) {
       issues.push({ kind: "unknown_employer", detail: worded`"${exp.company}" is not a knowledge-base experience` });
+      continue;
     }
+    // The title is the knowledge base's own for that employer. A project has a name and no title: its row may carry none.
+    const own = experiences.filter((e) => e.frontmatter.company.toLowerCase().trim() === key);
+    const project = own.every((e) => e.frontmatter.kind === "project");
+    const title = (exp.title ?? "").trim();
+    if (project && (!title || /^project$/i.test(title))) continue;
+    if (!titleHeld(title, own, `${extraCorpus}\n${opts.ownWriting ?? ""}`)) {
+      issues.push({
+        kind: "unknown_title",
+        key: keyOf("title", exp.company, title),
+        detail: worded`"${title}" under "${exp.company}" is not a title the knowledge base holds for that entry (it holds ${own.map((e) => `"${e.frontmatter.title ?? ""}"`).join(", ")}). Use the knowledge base's title as it is${project ? ", or none: this entry is a project" : ""}`,
+      });
+    }
+  }
+
+  // Counts of years. One the knowledge base states is the person's own; any other was worked out from dates, and must
+  // fit the dates of the roles its sentence names (tools/years.ts). Too long: refused. Fits: listed for the person.
+  const now = opts.now ?? new Date();
+  const allRaw = [...rawByCompany.values(), extraCorpus, opts.ownWriting ?? ""].join("\n");
+  const yearFindings = [
+    ...checkYears(gen.resume.executive_summary, "summary", allRaw, experiences, experiences, now),
+    ...gen.resume.experience.flatMap((exp) => {
+      const key = exp.company.toLowerCase().trim();
+      const own = experiences.filter((e) => e.frontmatter.company.toLowerCase().trim() === key);
+      if (!own.length) return [];
+      const sameTitle = own.filter((e) => flatWords(String(e.frontmatter.title ?? "")) === flatWords(exp.title ?? ""));
+      return checkYears([exp.summary ?? "", ...exp.bullets].join("\n"), `under "${exp.company}"`, `${rawByCompany.get(key) ?? ""}\n${extraCorpus}\n${opts.ownWriting ?? ""}`, sameTitle.length ? sameTitle : own, experiences, now);
+    }),
+  ];
+  // The person's own figure stands. Where their profile or their own résumé states a count of years of themselves
+  // ("seven years in corporate finance"), a summary sentence that names no title gives that figure, not one worked out
+  // from dates ("Eight years", true by the dates and not what the person says).
+  const ownFigures = yearClaims(`${extraCorpus}\n${opts.ownWriting ?? ""}`);
+  const summaryFindings = yearFindings.filter((f) => f.where === "summary" && ownFigures.length > 0 && f.by !== "title");
+  for (const f of summaryFindings) {
+    issues.push({
+      kind: "years_not_the_persons",
+      key: keyOf("years", f.claim),
+      line: f.sentence,
+      detail: worded`"${f.claim}" (summary): the person states their own count of years (${[...new Set(ownFigures.map((c) => `"${c.raw}"`))].join(", ")}). Their figure stands: write it as they did, or ask them whether it has changed`,
+    });
+  }
+  for (const f of yearFindings.filter((x) => !summaryFindings.includes(x))) {
+    const roles = f.roles.length > 3 ? `${f.roles.length} roles` : f.roles.join("; ");
+    issues.push(
+      f.kind === "exceeds"
+        ? { kind: "years_exceed_dates", key: keyOf("years", f.claim), line: f.sentence, detail: worded`"${f.claim}" (${f.where}): the dates of ${roles} give ${f.covered} years. Write the count the dates give for what the sentence says, or leave the count out` }
+        : { kind: "years_from_dates", key: keyOf("years", f.claim), line: f.sentence, detail: worded`"${f.claim}" (${f.where}) is stated nowhere in the knowledge base: it was worked out from the dates of ${roles} (${f.covered} years). Ask the person whether it is true of what the sentence says, or leave the count out` },
+    );
   }
 
   // Corpus-wide pass: a metric found NOWHERE in verified evidence is fabricated.
@@ -326,10 +586,15 @@ export function checkResumeGrounding(
   const entryTexts = experiences.map((e) => serializeExperience(stripUnverified(e)));
   for (const token of extractCountTokens(gen.resume.executive_summary)) {
     if (allNumbers.has(token.value)) continue;
-    // "Five products", "three markets": a total composed across roles is on no
-    // single line. When the knowledge base could add up to it, the save is not blocked
-    // and the stretch check lists the total for the candidate to confirm.
-    if (composableTotal(token, entryTexts)) continue;
+    // "Five products", "three markets": a total composed across roles is on no single line. Until 15 November 2026 it
+    // was let through and listed; a number that stands nowhere now stops the save, and the message says that it may be
+    // a total the person can confirm.
+    // "Five products", "three markets": a total composed across roles is on no single line. When the knowledge base
+    // could add up to it, the save is not stopped: the total is a finding, for the person to confirm.
+    if (composableTotal(token, entryTexts)) {
+      issues.push({ kind: "composed_total", key: keyOf("total", token.raw), detail: worded`"${token.raw}" (summary): no line of the knowledge base states this count. It may be a total across roles: leave it out, or ask the person and save it as a fact of theirs` });
+      continue;
+    }
     issues.push({ kind: "ungrounded_count", detail: worded`"${token.raw}" (summary): the number ${token.value} is not in any verified KB fact` });
   }
   for (const exp of gen.resume.experience) {
@@ -350,6 +615,7 @@ export function checkResumeGrounding(
   // name found nowhere is an organisation the knowledge base does not know.
   const companyNames = experiences.map((e) => e.frontmatter.company);
   const recorded = [...rawByCompany.values()].join("\n");
+  const evidenceAll = [recorded, extraCorpus, opts.ownWriting ?? ""].join("\n");
   const proseUnits = [
     { where: "summary", text: gen.resume.executive_summary },
     ...gen.resume.experience.flatMap((exp) => [exp.summary ?? "", ...exp.bullets].map((text) => ({ where: `under "${exp.company}"`, text }))),
@@ -364,12 +630,56 @@ export function checkResumeGrounding(
     }
   }
 
+  // Dates. A row's first and last date are the start and the end of an entry of that employer (two roles at one
+  // employer may be written as one row, from the first one's start to the last one's end). A year that differs, or a
+  // month where both sides give one, stops the save.
+  for (const exp of gen.resume.experience) {
+    const own = experiences.filter((e) => e.frontmatter.company.toLowerCase().trim() === exp.company.toLowerCase().trim());
+    if (!own.length) continue;
+    const found = rowDates(exp.dates);
+    if (!found) {
+      issues.push({ kind: "dates_differ", key: keyOf("dates", exp.company, exp.dates), detail: worded`"${exp.dates}" under "${exp.company}": no year can be read in these dates. Write the entry's own dates` });
+      continue;
+    }
+    const same = (row: DatePoint, value: unknown, end: boolean) => {
+      const kb = datePoint(value, end);
+      return kb === null ? null : row.present || kb.present ? row.present === kb.present : row.year === kb.year && (row.month === null || kb.month === null || row.month === kb.month);
+    };
+    const starts = own.map((e) => same(found.start, e.frontmatter.start, false));
+    const ends = own.map((e) => same(found.end, e.frontmatter.end, true));
+    if (starts.every((x) => x === null) && ends.every((x) => x === null)) continue; // the entries carry no dates that can be read
+    if (!starts.some((x) => x !== false) || !ends.some((x) => x !== false)) {
+      issues.push({
+        kind: "dates_differ",
+        key: keyOf("dates", exp.company, `${found.start.year} ${found.end.present ? "present" : found.end.year}`),
+        detail: worded`"${exp.dates}" under "${exp.company}": the knowledge base holds ${own.map((e) => `${String(e.frontmatter.start ?? "?")} to ${String(e.frontmatter.end ?? "?")}`).join("; ")} for that entry. Write its dates as they are`,
+      });
+    }
+  }
+
+  // What the person did not do is context for the Writer, never a line ("…; did not lead the deal").
+  for (const unit of proseUnits) {
+    for (const sentence of unit.text.split(/(?<=[.;!?])\s+|\n+/)) {
+      const m = NEGATIVE.exec(sentence);
+      if (m) issues.push({ kind: "negative_statement", key: keyOf("negative", sentence), line: sentence.trim(), detail: worded`"${m[0]}" (${unit.where}): a résumé says what the person did, never what they did not do. Leave the statement out; it limits what the other lines may claim` });
+    }
+  }
+
+  // An audience the person did not give ("the plant manager presented it" becoming "presented it to leadership").
+  for (const exp of gen.resume.experience) {
+    const own = rawByCompany.get(exp.company.toLowerCase().trim());
+    if (own === undefined) continue;
+    for (const line of [exp.summary ?? "", ...exp.bullets]) for (const a of unknownAudiences(line, `${own}\n${extraCorpus}`)) issues.push({ kind: "unknown_audience", key: keyOf("audience", exp.company, a), line, detail: worded`"${a}" under "${exp.company}": no verified fact of that role names this audience. Say who it was in the person's own words, or leave the audience out` });
+  }
+  for (const a of unknownAudiences(gen.resume.executive_summary, evidenceAll)) issues.push({ kind: "unknown_audience", key: keyOf("audience", "summary", a), line: gen.resume.executive_summary, detail: worded`"${a}" (summary): no verified fact names this audience. Say who it was in the person's own words, or leave the audience out` });
+
   // Skills, credentials and education. A credential (on the skills line or
   // in prose) and an education entry must sit on one line of the verified
   // evidence. A named tool or acronym on the skills line that the evidence
   // never mentions is reported, not blocked: skills lines are themes in the
   // candidate's own words, and only their named terms can be checked.
-  const evidence = [...rawByCompany.values(), extraCorpus].join("\n");
+  // The person's own writing (their reference résumé, their summary blocks) is their own list as much as the profile's.
+  const evidence = [...rawByCompany.values(), extraCorpus, opts.ownWriting ?? ""].join("\n");
   const evidenceLines = evidence.split("\n").map(wordSet).filter((w) => w.size);
   const evidenceWords = new Set(evidenceLines.flatMap((w) => [...w]));
   const evidenceTerms = termSet(evidence);
@@ -392,29 +702,85 @@ export function checkResumeGrounding(
     const rest = items.filter((seg) => !credentials.includes(seg));
     const missing = namedTerms(rest, colon > 0 || segments.length === 1).filter((t) => !GENERIC_ACRONYMS.has(singular(t.toLowerCase()))).filter((t) => !evidenceTerms.has(t.toLowerCase()) && !evidenceTerms.has(singular(t.toLowerCase())));
     if (missing.length) {
-      issues.push({ kind: "ungrounded_skill", detail: worded`"${skill}" (skills): ${missing.map((m) => `"${m}"`).join(", ")} appears nowhere in the verified KB evidence` });
+      issues.push({ kind: "ungrounded_skill", key: keyOf("skills", skill), line: skill, detail: worded`"${skill}" (skills): ${missing.map((m) => `"${m}"`).join(", ")} appears nowhere in the verified KB evidence` });
+    }
+    // Every skill and every language listed stands in the knowledge base: on the person's own list, or in the words of
+    // a verified fact. Never a label of the writer's ("Editorial leadership", "Safety program management": the run on
+    // other professions). A heading before a colon is checked too, unless it is one of the plain section words.
+    // (An item already named above for a tool the evidence never mentions is not named twice.)
+    if (!missing.length) {
+      const label = colon > 0 ? skill.slice(0, colon).trim() : "";
+      const parts = [
+        ...(label && !SKILL_HEADINGS.has(label.toLowerCase()) ? [label] : []),
+        ...(colon > 0 ? skill.slice(colon + 1) : skill).replace(/\([^)]*\)/g, " ").split(/[,;·]|\s[&\/]\s/).map((x) => x.trim()).filter(Boolean),
+      ];
+      // A plural is the same skill: "REST APIs" where the fact says "a REST API".
+      const heldOnALine = (words: string[]) => evidenceLines.some((line) => words.every((w) => line.has(w) || line.has(w.replace(/s$/, "")) || line.has(`${w}s`)));
+      const notHeld = parts.filter((part) => {
+        const words = [...wordSet(part)];
+        return words.length > 0 && !heldOnALine(words);
+      });
+      if (notHeld.length) {
+        issues.push({
+          kind: "skill_not_held",
+          key: keyOf("skills", skill),
+          line: skill,
+          detail: worded`${notHeld.map((m) => `"${m}"`).join(", ")} (skills): not in the person's own list of skills and in the words of no verified fact. Use their list as they wrote it, or the words a fact uses; to add a skill, ask them and save it to their profile first`,
+        });
+      }
+    }
+  }
+  // A skill the person lists themselves and the job ad names, left out of the Skills section: listed for the Writer.
+  if (opts.statedSkills?.length && opts.jobText) {
+    const ad = flatWords(opts.jobText);
+    const section = flatWords((gen.resume.skills ?? []).join(" , "));
+    for (const listed of opts.statedSkills) {
+      const names = [listed.replace(/\([^)]*\)/g, " "), ...[...listed.matchAll(/\(([^)]*)\)/g)].flatMap((m) => m[1]!.split(","))].map((x) => flatWords(x)).filter((x) => x.trim().length > 1);
+      if (names.some((n) => ad.includes(n)) && !names.some((n) => section.includes(n))) {
+        issues.push({ kind: "listed_skill_left_out", key: keyOf("left out", listed), detail: worded`"${listed}" is on the person's own list of skills and the job ad names it; the Skills section leaves it out. Add it as they wrote it` });
+      }
     }
   }
   for (const phrase of credentialPhrases(prose)) credentialIssue(phrase, "résumé text");
-  // Without an education record there is nothing to check an entry against:
-  // a user who keeps education only on the résumé is not blocked.
-  for (const ed of opts.educationRecorded ? (gen.resume.education ?? []) : []) {
+  // Every school, degree, licence and certificate is held against the knowledge base: an education entry, or what the
+  // person wrote themselves (their profile, their own résumé). With education entries on file a row they do not hold
+  // stops the save, as before; with none (it let any row through until 15 November 2026) the row is a finding.
+  for (const ed of gen.resume.education ?? []) {
     const institution = [...wordSet(ed.institution)];
     const credential = [...wordSet(ed.credential)];
     const known = credential.filter((w) => evidenceWords.has(w)).length;
     if ((institution.length && !onOneLine(institution)) || (credential.length && known * 2 < credential.length)) {
-      issues.push({ kind: "ungrounded_credential", detail: worded`"${ed.credential}, ${ed.institution}" (education) is not in the verified KB evidence` });
+      issues.push(
+        opts.educationRecorded
+          ? { kind: "ungrounded_credential", detail: worded`"${ed.credential}, ${ed.institution}" (education) is not in the verified KB evidence` }
+          : { kind: "education_differs", key: keyOf("education", ed.credential, ed.institution), detail: worded`"${ed.credential}, ${ed.institution}" (education) is not in the knowledge base, which holds no education entry. Leave the row out, or ask the person and save the entry (save_education)` },
+      );
+      continue;
     }
+    // A certificate whose entry names no school and no issuer is written with none: "Google" and "Online course" were
+    // given as schools in the run on other professions, each a word of the entry's own line. Where the entry names a
+    // school, the check above holds (its name in the person's words, on one line of the evidence).
+    const entries = (opts.educationEntries ?? []).filter((e) => e.credential && credential.filter((w) => wordSet(e.text).has(w)).length * 2 >= credential.length);
+    if (entries.length && ed.institution.trim() && !entries.some((e) => e.institution)) {
+      issues.push({ kind: "education_differs", key: keyOf("education", ed.credential, ed.institution), detail: worded`"${ed.credential}, ${ed.institution}" (education): the knowledge base's entry for this credential names no school or issuer. Leave it empty` });
+      continue;
+    }
+    // Its years are the entry's own (or, with no entry, those of a line of the evidence that holds the credential).
+    const years = [...(ed.dates ?? "").matchAll(/\b(?:19|20)\d{2}\b/g)].map((m) => m[0]);
+    const held = entries.length ? entries.map((e) => e.text).join("\n") : evidence.split("\n").filter((l) => credential.filter((w) => wordSet(l).has(w)).length * 2 >= credential.length).join("\n");
+    const missing = years.filter((y) => !held.includes(y));
+    if (missing.length) issues.push({ kind: "dates_differ", key: keyOf("education dates", ed.credential, missing.join(" ")), detail: worded`"${ed.credential}" (education): ${missing.join(", ")} is not a year the knowledge base holds for it. Write the year it holds, or none` });
   }
 
   // A source is grounded if it names a real KB experience by ANY of its
   // identifiers (see `auditSourceExperiences`).
-  const namesKnownSource = (label: string): boolean => auditSourceExperiences(label, experiences) !== null;
+  // An education or credential entry is a source too: a line about a degree or a certificate names it.
+  const namesKnownSource = (label: string): boolean => auditSourceExperiences(label, experiences) !== null || namesEducation(label, opts.educationEntries ?? []);
   for (const entry of gen.provenance_audit) {
     if (!namesKnownSource(entry.source_experience)) {
       issues.push({
         kind: "unknown_source",
-        detail: worded`provenance source "${entry.source_experience}" is not a KB experience (use a file name, id, or company from the KB)`,
+        detail: worded`provenance source "${entry.source_experience}" is not an entry of the knowledge base (use the file name, id or employer of a role, or the file name of an education or credential entry)`,
       });
     }
   }
@@ -793,6 +1159,8 @@ export function composableTotal(token: CountToken, entryTexts: string[]): boolea
 /** A skills-line entry (or one segment of it) that names a credential rather than a skill. */
 const CREDENTIAL_RE = /\b(?:certif\w*|licen[sc]\w*|accredit\w*|chartered|credential\w*|diploma|pmp|capm|cspo|csm|psm|cfa|cpa|cissp|cisa|cism|itil|prince2|ccna|ccnp|cka|ckad|phr|sphr|frm)\b/i;
 
+/** Headings of a skills line that name no skill: "Languages: English (native)", "Tools: SQL". */
+const SKILL_HEADINGS = new Set("languages language tools tool skills technical software certifications methods platforms programming data other systems core additional".split(" "));
 const SKILL_STOPWORDS = new Set("and or of the a an in on for to with at by from as via including incl etc e g i e".split(" "));
 
 /** Words of a phrase for evidence matching: lowercase, light plural/verb stemming, "certified/certification" folded. */
@@ -1023,3 +1391,23 @@ const normalize = (s: string) => s.toLowerCase().replace(/[’']/g, "'");
 /** Comparison form for metric matching: lowercase, no commas/spaces. */
 const normalizeMetrics = (s: string) => s.toLowerCase().replace(/[,\s]/g, "");
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// --- Questions asked of the person -------------------------------------------
+
+const LEADING = /\b(?:such as|e\.g\.|for example|for instance|like (?:a|an|the)?\s*[A-Z][\w+#.-]*|or something (?:else|similar)|or similar|or the like|etc\.?)(?=[\s,).?]|$)|\((?:[^()]*(?:\bor\b|,)[^()]*)\)/;
+
+/**
+ * Questions that suggest their answer: an example ("such as", "for example", "like" followed by a tool's name),
+ * or a list of options in brackets ("(SQS, RabbitMQ)"). Seen in the run on other professions: "did you use an
+ * email tool (like" two named tools "…)", "Was that Kafka, or something else (SQS, RabbitMQ)". A question asks
+ * whether something happened, or where; the person supplies the rest.
+ */
+export function leadingQuestions(questions: unknown[]): { question: string; marker: string }[] {
+  const out: { question: string; marker: string }[] = [];
+  for (const q of questions) {
+    if (typeof q !== "string") continue;
+    const m = LEADING.exec(q);
+    if (m) out.push({ question: q, marker: m[0].trim() });
+  }
+  return out;
+}

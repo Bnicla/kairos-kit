@@ -31,6 +31,12 @@ Assess how the candidate's material reads against 2026 AI-content detectors and 
 **GAP ANALYSIS.**
 List the specific requirements the candidate does not currently evidence. For each: severity (DEAL-BREAKER / IMPORTANT / NICE-TO-HAVE), and whether it looks like (a) a genuine gap, or (b) possibly-present-but-not-yet-captured (a knowledge-base gap we should ask the user about). NEVER invent experience to close a gap.
 
+**SKILLS AND LANGUAGES THE CANDIDATE LISTS.**
+candidate.profile_facts.skills is the candidate's own list of skills, in their own words, as their résumé or they themselves gave it; candidate.profile_facts.languages is their list of languages. An item on either list is stated by the candidate: never report it as a gap, and never ask whether they have it. When no role shows where a listed skill was used, count it as stated and not yet evidenced (below a skill a role demonstrates), and you may ask WHERE it was used (type possibly_uncaptured).
+
+**CLARIFYING QUESTIONS.**
+A clarifying_question asks, in plain words, whether something happened or where. It offers no answer: no example answers, no "like X or Y", no "for example", and no tool, product or option the candidate did not name.
+
 **REACHABLE ESTIMATE.**
 State what the match band could HONESTLY become IF (a) the resume is tailored using existing real evidence, and (b) the "possibly-present-but-not-captured" items are confirmed by the user. Do not assume unconfirmed facts. Be explicit about which improvements are "reframing existing evidence" vs. "needs user to confirm new facts."
 
@@ -58,7 +64,7 @@ export interface ScoringInput {
    */
   /** The application's track (direction); positioning only, never facts. */
   track?: TrackGuidance | null;
-  profileFacts?: { languages?: string[]; work_authorization?: string; location?: string; relocation?: string } | null;
+  profileFacts?: { languages?: string[]; skills?: string[]; work_authorization?: string; location?: string; relocation?: string } | null;
 }
 
 /** Pull the scoring-relevant facts out of profile.md frontmatter. */
@@ -68,13 +74,16 @@ export function profileFactsFrom(fm: Record<string, unknown> | null | undefined)
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
   const languages = Array.isArray(fm.languages) ? fm.languages.filter((l): l is string => typeof l === "string") : undefined;
   const relocation = str(prefs.relocation);
+  // The person's own list of skills, in their words (read from their résumé's skills section, or told).
+  const skills = Array.isArray(fm.skills) ? fm.skills.filter((l): l is string => typeof l === "string" && l.trim().length > 0) : undefined;
   const facts = {
     languages,
+    ...(skills?.length ? { skills } : {}),
     work_authorization: str(prefs.work_authorization),
     location: str(prefs.location),
     ...(relocation ? { relocation } : {}),
   };
-  return facts.languages?.length || facts.work_authorization || facts.location || relocation ? facts : null;
+  return facts.languages?.length || skills?.length || facts.work_authorization || facts.location || relocation ? facts : null;
 }
 
 /**

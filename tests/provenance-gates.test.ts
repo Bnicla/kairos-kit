@@ -115,7 +115,9 @@ describe("plain counts", () => {
 
   it("does not take a date part or a percentage of the knowledge base as a count", () => {
     // "2019-12" and "2022-03" are dates in the frontmatter, not a 12 or a 3.
-    expect(kinds(resume({ company: "Tallgrass Logistics", bullets: ["Worked with 12 carriers."] }))).toEqual(["ungrounded_count"]);
+    // (The row keeps the other employer's title, which the knowledge base does not hold for this one: refused too.)
+    // (and its dates, which are not that entry's either).
+    expect(kinds(resume({ company: "Tallgrass Logistics", bullets: ["Worked with 12 carriers."] }))).toEqual(["unknown_title", "ungrounded_count", "dates_differ"]);
   });
 });
 
@@ -130,38 +132,60 @@ describe("credentials, skills and education", () => {
   });
 
   it("blocks a credential the knowledge base does not hold, on the skills line or in prose", () => {
-    expect(kinds(resume({ skills: ["Go", "AWS Certified Solutions Architect"] }))).toEqual(["ungrounded_credential"]);
+    expect(kinds(resume({ skills: ["Go", "AWS Certified Solutions Architect"] }))).toEqual(["ungrounded_credential", "skill_not_held"]);
     expect(kinds(resume({ skills: ["Project Management Professional (PMP)"] }))).toContain("ungrounded_credential");
     expect(kinds(resume({ executive_summary: "Engineer and Certified Kubernetes Administrator.", bullets: [] }))).toEqual(["ungrounded_credential"]);
   });
 
   it("accepts a credential the knowledge base holds, in another word order", () => {
-    expect(kinds(resume({ skills: ["Agile delivery (Scrum Product Owner certification)"] }), EDUCATION)).toEqual([]);
+    expect(kinds(resume({ skills: ["Go (Scrum Product Owner certification)"] }), EDUCATION)).toEqual([]);
+    // The credential is held; the words before it are not anyone's ("Agile delivery" is in no fact and on no list).
+    expect(kinds(resume({ skills: ["Agile delivery (Scrum Product Owner certification)"] }), EDUCATION)).toEqual(["skill_not_held"]);
     expect(kinds(resume({ executive_summary: "Engineer and Certified Scrum Product Owner.", bullets: [] }), EDUCATION)).toEqual([]);
   });
 
-  it("reports, without blocking, a named tool or acronym the knowledge base never mentions", () => {
+  it("finds a named tool or acronym the knowledge base never mentions, and a skills item in nobody's words", () => {
     expect(namedTerms(["Google Maps SDK"])).toEqual(["Maps", "SDK"]);
     expect(namedTerms(["Kafka"])).toEqual(["Kafka"]);
     expect(namedTerms(["Event-driven design", "Fundraising"], false)).toEqual([]);
     const issues = checkResumeGrounding(resume({ skills: ["Go", "Kubernetes", "Event-driven design", "KPIs & roadmaps", "Queues (Kafka, RabbitMQ)"] }), exps);
-    expect(issues.map((i) => i.kind)).toEqual(["ungrounded_skill", "ungrounded_skill"]);
+    // Since 15 November 2026 every item of the skills line is held against the knowledge base: the two tools it never
+    // mentions, and the two themes that are in no fact's words ("Go" is a skill of the role). Findings, not stops: a
+    // person may keep a skills line of their own.
+    expect(issues.map((i) => [i.kind, i.line])).toEqual([
+      ["ungrounded_skill", "Kubernetes"],
+      ["skill_not_held", "Event-driven design"],
+      ["skill_not_held", "KPIs & roadmaps"],
+      ["ungrounded_skill", "Queues (Kafka, RabbitMQ)"],
+    ]);
     expect(issues.map((i) => i.detail).join(" ")).toMatch(/"Kubernetes".*"RabbitMQ"/);
     expect(issues.every((i) => ADVISORY_GROUNDING.has(i.kind))).toBe(true);
+    // The person's own list makes an item theirs.
+    expect(checkResumeGrounding(resume({ skills: ["Go", "Kubernetes", "Event-driven design"] }), exps, "---\nskills:\n  - Kubernetes\n  - Event-driven design\n---\n")).toEqual([]);
   });
 
   it("reads a category label before a colon as a label, and the items after it as names", () => {
     const issues = checkResumeGrounding(resume({ skills: ["Data and Messaging: Go, event-driven design", "Frameworks and Cloud: AWS, Kubernetes, Redis"] }), exps);
-    expect(issues.map((i) => i.kind)).toEqual(["ungrounded_skill"]);
-    expect(issues[0].detail).toMatch(/"Kubernetes", "Redis" appears nowhere/);
+    // The heading is checked as an item is, unless it is a plain section word ("Tools", "Languages").
+    expect(issues.map((i) => i.kind)).toEqual(["skill_not_held", "ungrounded_skill"]);
+    expect(issues[0]!.detail).toMatch(/^"Data and Messaging", "event-driven design" \(skills\)/);
+    expect(issues[1]!.detail).toMatch(/"Kubernetes", "Redis" appears nowhere/);
+    expect(checkResumeGrounding(resume({ skills: ["Tools: Go, AWS", "Languages: Go"] }), exps)).toEqual([]);
   });
 
-  it("checks education entries only when the knowledge base holds education", () => {
+  it("checks every education row, whether or not the knowledge base holds an education entry", () => {
     const g = resume({ education: [{ institution: "Harrow University", credential: "MBA" }] });
-    expect(kinds(g, EDUCATION)).toEqual([]);
+    // Until 15 November 2026 a knowledge base with no education entry let any row through unseen. It is now a finding;
+    // with education entries on file a row they do not hold stops the save, as before.
+    expect(kinds(g)).toEqual(["education_differs"]);
+    expect(kinds(g, EDUCATION)).toEqual(["education_differs"]);
     expect(kinds(g, EDUCATION, { educationRecorded: true })).toEqual(["ungrounded_credential"]);
+    expect(ADVISORY_GROUNDING.has("education_differs")).toBe(true);
+    expect(ADVISORY_GROUNDING.has("ungrounded_credential")).toBe(false);
     const real = resume({ education: [{ institution: "University of Texas at Austin", credential: "B.S. Computer Science", dates: "2012 – 2016" }] });
     expect(kinds(real, EDUCATION, { educationRecorded: true })).toEqual([]);
+    // A year the evidence does not hold for that degree is not the person's.
+    expect(kinds(resume({ education: [{ institution: "University of Texas at Austin", credential: "B.S. Computer Science", dates: "2013 – 2017" }] }), EDUCATION)).toEqual(["dates_differ"]);
   });
 });
 
@@ -328,7 +352,8 @@ describe("an employer named in prose", () => {
 
   it("blocks a name the knowledge base never mentions, in a bullet and in the summary", () => {
     expect(pmKinds(pmResume({ bullets: ["At Quorvex Labs, I built the billing service."] }))).toEqual(["unknown_organisation"]);
-    expect(pmKinds(pmResume({ bullets: ["Rebuilt the sign-up flow after two years at Quorvex Labs."] }))).toEqual(["unknown_organisation"]);
+    // (Its "two years" is a count the knowledge base does not state: listed for the person, see tests/trial-fixes.test.ts.)
+    expect(pmKinds(pmResume({ bullets: ["Rebuilt the sign-up flow after two years at Quorvex Labs."] }))).toEqual(["years_from_dates", "unknown_organisation"]);
     expect(pmKinds(pmResume({ summary: "Product manager in logistics software, previously at Quorvex Labs." }))).toEqual(["unknown_organisation"]);
     expect(ADVISORY_GROUNDING.has("unknown_organisation")).toBe(false);
   });
@@ -446,9 +471,13 @@ describe("the executive summary, sentence by sentence", () => {
     expect(summary("Ten years in logistics software.", `${PM_EXTRA}\nTen years in logistics, the first three in dispatch. [C]`)).toEqual([]);
   });
 
-  it("lists a count composed across roles, and still blocks a count the knowledge base cannot add up to", () => {
+  it("finds a count composed across roles, and still blocks a count the knowledge base cannot add up to", () => {
     const five = pmResume({ summary: "Launched products in five markets." });
-    expect(pmKinds(five)).toEqual([]);
+    // A total the knowledge base could add up to does not stop the save: it is a finding of its own, and the stretch
+    // check lists it too.
+    expect(pmKinds(five)).toEqual(["composed_total"]);
+    expect(checkResumeGrounding(five, pm, PM_EXTRA)[0]!.detail).toContain("It may be a total across roles: leave it out, or ask the person and save it as a fact of theirs");
+    expect(ADVISORY_GROUNDING.has("composed_total")).toBe(true);
     expect(pmStretch(five)).toEqual([["Executive summary", "total", "five markets"]]);
     expect(pmKinds(pmResume({ summary: "Launched products in 12 markets." }))).toEqual(["ungrounded_count"]);
     expect(pmKinds(pmResume({ summary: "Managed 9 analysts." }))).toEqual(["ungrounded_count"]);
@@ -512,12 +541,23 @@ describe("save path", () => {
     return { store, id: meta.id };
   };
 
-  it("blocks a count and a credential, and reports an unknown tool as a warning", async () => {
+  it("blocks a count and a credential, and returns a tool the knowledge base never mentions as a finding", async () => {
     const { store, id } = await setup(false);
     await expect(saveGeneratedResume(store, id, resume({ bullets: ["Run the on-call rotation with a team of 12 engineers."] }))).rejects.toThrow(/ungrounded_count/);
     await expect(saveGeneratedResume(store, id, resume({ bullets: ["Built the payouts API for 14,000 merchants."], skills: ["AWS Certified Solutions Architect"] }))).rejects.toThrow(/ungrounded_credential/);
-    const ok = await saveGeneratedResume(store, id, resume({ bullets: ["Built the payouts API for 14,000 merchants."], skills: ["Go", "Kubernetes"] }));
-    expect(ok.warnings.some((w) => w.includes("ungrounded_skill") && w.includes("Kubernetes"))).toBe(true);
+    const withTool = await saveGeneratedResume(store, id, resume({ executive_summary: "Staff Software Engineer at Northbeam Payments.", bullets: ["Built the payouts API for 14,000 merchants."], skills: ["Go", "Kubernetes"] }));
+    expect(withTool.warnings.some((w) => w.includes("ungrounded_skill") && w.includes("Kubernetes"))).toBe(true);
+    expect(withTool.findings.put_right).toEqual([
+      {
+        key: "skills|kubernetes",
+        kind: "ungrounded_skill",
+        line: "Kubernetes",
+        what: '"Kubernetes" (skills): "Kubernetes" appears nowhere in the verified KB evidence',
+        say: '"Kubernetes" is in the skills section. It is not on your list of skills, and no fact of yours says it in these words.',
+      },
+    ]);
+    const ok = await saveGeneratedResume(store, id, resume({ executive_summary: "Staff Software Engineer at Northbeam Payments.", bullets: ["Built the payouts API for 14,000 merchants."], skills: ["Go", "AWS"] }));
+    expect(ok.findings).toEqual({ put_right: [], tell_user: [], kept_by_choice: [] });
   });
 
   it("blocks an employer invented in prose, and lists a number attached to another result and a summary total", async () => {
@@ -527,21 +567,46 @@ describe("save path", () => {
     const meta = await createApplication(store, { company: "Ridgeway", role: "Product Manager", snapshotMarkdown: "# Product Manager\nRouting.", source_url_unavailable: true });
     await expect(saveGeneratedResume(store, meta.id, pmResume({ bullets: ["At Quorvex Labs, I built the billing service."] }))).rejects.toThrow(/unknown_organisation.*Quorvex Labs/);
     await expect(saveGeneratedResume(store, meta.id, pmResume({ summary: "Product manager, previously at Quorvex Labs.", bullets: ["Grew weekly active shippers to 2,400."] }))).rejects.toThrow(/unknown_organisation.*summary/);
-    const res = await saveGeneratedResume(
-      store,
-      meta.id,
-      pmResume({ summary: "Ten years in logistics software, ready for the routing team at Ridgeway.", bullets: ["Raised revenue by 40%.", "Launched carrier scorecards in 3 markets."] }),
-    );
-    expect(res.stretch.map((f) => [f.company, f.rule, f.trigger])).toEqual([
+    // A count of years longer than the roles' dates (January 2019 to December 2025: seven years), and a number given
+    // to another result ("cut onboarding time by 40%" in the knowledge base): saved, and returned for the Writer to put right.
+    const bullets = ["Raised revenue by 40%.", "Launched carrier scorecards in 3 markets."];
+    const long = await saveGeneratedResume(store, meta.id, pmResume({ summary: "Ten years in logistics software, ready for the routing team at Ridgeway.", bullets }));
+    expect(long.findings.put_right.map((f) => [f.kind, f.line])).toEqual([
+      ["years_exceed_dates", "Ten years in logistics software, ready for the routing team at Ridgeway."],
+      ["line_with_no_origin", "Ten years in logistics software, ready for the routing team at Ridgeway."],
+      ["line_with_no_origin", "Raised revenue by 40%."],
+    ]);
+    expect(long.findings.put_right[0]!.what).toMatch(/^"Ten years" \(summary\): the dates of .* give 7 years\./);
+    expect(long.stretch.map((f) => [f.company, f.rule, f.trigger])).toEqual([
       ["Executive summary", "total", "Ten years"],
       ["Orbit Freight", "number", "40%"],
     ]);
+    // A count of years the dates allow is for the person to settle: it was worked out from dates, and nobody stated it.
+    const res = await saveGeneratedResume(store, meta.id, pmResume({ summary: "Seven years as a product manager, at Orbit Freight and Pelican Maps.", bullets: ["Launched carrier scorecards in 3 markets."] }));
+    expect(res.stretch).toEqual([]);
+    expect(res.findings.put_right).toEqual([]);
+    expect(res.findings.tell_user.map((f) => [f.kind, f.key])).toEqual([["years_from_dates", "years|seven years"]]);
+    expect(res.warnings.filter((w) => w.startsWith("[years_from_dates]"))).toEqual([expect.stringContaining('"Seven years" (summary) is stated nowhere in the knowledge base')]);
   });
 
-  it("returns a drift as a stretch finding for the candidate to decide", async () => {
+  it("returns a drift for the Writer to put right: the knowledge base says less than the line; the person's confirmation makes it stand", async () => {
     const { store, id } = await setup(false);
-    const res = await saveGeneratedResume(store, id, resume({ bullets: ["Implemented Kafka for the event bus."] }));
-    expect(res.stretch.map((f) => f.trigger)).toEqual(["implemented"]);
+    const g = resume({ executive_summary: "Staff Software Engineer at Northbeam Payments.", bullets: ["Implemented Kafka for the event bus."] });
+    const res = await saveGeneratedResume(store, id, g);
+    expect(res.findings.put_right).toEqual([
+      {
+        key: "verb|northbeam payments|implemented|implemented kafka for the event bus",
+        kind: "says_more_than_the_fact",
+        line: "Implemented Kafka for the event bus.",
+        what: '"implemented" (Northbeam Payments): the knowledge base says "evaluated kafka and a managed queue for the event bus and wrote the comparison": it was assessed, the bullet says "implemented". Say what the person did in the knowledge base\'s own words; another verb for the same claim changes nothing',
+        say: 'This line says more than your knowledge base does ("implemented"): "Implemented Kafka for the event bus.".',
+      },
+    ]);
+    // It is not also listed as a wording for the person to keep, soften or drop.
+    expect(res.stretch).toEqual([]);
+    // Once the person has confirmed the stronger fact, it is theirs, and nothing is found.
+    await store.writeFile(["knowledge-base", "experiences", "01-northbeam-staff.md"], `${NORTHBEAM}- Implemented Kafka for the event bus of the ledger in 2025. [C]\n`);
+    expect((await saveGeneratedResume(store, id, g)).findings.put_right).toEqual([]);
   });
 
   it("checks education against the knowledge base's education files when there are any", async () => {
@@ -550,7 +615,8 @@ describe("save path", () => {
     await expect(saveGeneratedResume(withEducation.store, withEducation.id, invented)).rejects.toThrow(/ungrounded_credential/);
     const real = resume({ bullets: ["Built the payouts API for 14,000 merchants."], education: [{ institution: "University of Texas at Austin", credential: "B.S. Computer Science" }], skills: ["Certified Scrum Product Owner"] });
     await expect(saveGeneratedResume(withEducation.store, withEducation.id, real)).resolves.toBeTruthy();
+    // With no education entry at all the row has nothing to stand on either: saved, and returned as a finding (it was let through unseen until 15 November 2026).
     const none = await setup(false);
-    await expect(saveGeneratedResume(none.store, none.id, invented)).resolves.toBeTruthy();
+    expect((await saveGeneratedResume(none.store, none.id, invented)).findings.put_right.map((f) => f.kind)).toContain("education_differs");
   });
 });

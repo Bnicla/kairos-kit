@@ -29,6 +29,12 @@ export interface SkillEntry {
 
 export interface ExperienceFrontmatter {
   id: string;
+  /**
+   * "project": an entry that is the person's own project (a capstone, a personal project), not a job.
+   * `company` then holds the project's own name, as the person wrote it, and `title` their part in it
+   * only when they stated one ("Project" otherwise). Absent or "role": a job, an internship, a post.
+   */
+  kind?: "role" | "project";
   company: string;
   company_context?: string;
   location?: string;

@@ -35,16 +35,17 @@ const BULLETS = [
 const resume = (coverage?: RequirementCoverageRow[]): GeneratedResume => ({
   resume: {
     header: { name: "Alex Sample", contact: "Chicago" },
-    executive_summary: "- **Product leader:** ships platforms with measured outcomes.",
+    executive_summary: "- **Role:** Product Manager at Acme.",
     experience: [{ company: "Acme", title: "Product Manager", dates: "2020 – 2022", bullets: [...BULLETS] }],
-    education: [{ institution: "Westbrook", credential: "MBA" }],
-    skills: ["Platforms", "Evals", "SQL"],
+    education: [],
+    skills: [],
   },
   provenance_audit: [{ claim: "savings", source_experience: "01-acme-pm", prov: "R" }],
   ...(coverage ? { requirement_coverage: coverage } : {}),
 });
 
-const MD = generatedResumeToMarkdown(resume());
+// (The skills line is there for the matching tests only: the saves below keep to what the fixture's knowledge base holds.)
+const MD = generatedResumeToMarkdown({ ...resume(), resume: { ...resume().resume, skills: ["Platforms", "Evals", "SQL"] } });
 
 const row = (r: Partial<RequirementCoverageRow> & Pick<RequirementCoverageRow, "requirement" | "status">): RequirementCoverageRow => ({
   priority: "required",

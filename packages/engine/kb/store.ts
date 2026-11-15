@@ -65,6 +65,13 @@ export async function appendRecruiterFeedback(
   );
 }
 
+/** The education and credential entries with their file names (loadEducation returns the raw files only). */
+export const loadEducationEntries = async (store: Store): Promise<{ fileName: string; raw: string }[]> => {
+  const files = (await store.listFiles([KB, "education"])).filter((f) => f.name.endsWith(".md"));
+  const raws = await Promise.all(files.map((f) => store.readFile([KB, "education", f.name])));
+  return files.map((f, i) => ({ fileName: f.name, raw: raws[i] ?? "" })).filter((e) => e.raw);
+};
+
 export const loadEducation = async (store: Store): Promise<string[]> => {
   const files = await store.listFiles([KB, "education"]);
   const raws = await Promise.all(

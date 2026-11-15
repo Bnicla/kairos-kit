@@ -101,6 +101,11 @@ export interface GeneratedResume {
     executive_summary: string;
     experience: {
       company: string;
+      /**
+       * Set by the save, never by the model: "project" when the knowledge base's entry is one. The row then
+       * stands under "Projects", headed by its name (`company`), with no title unless the person stated one.
+       */
+      kind?: "project";
       title: string;
       location?: string;
       dates: string;
@@ -110,6 +115,8 @@ export interface GeneratedResume {
     }[];
     education: { institution: string; credential: string; dates?: string }[];
     skills: string[];
+    /** Set by the save, never by the model: education stands before experience (a student, a recent graduate). */
+    education_first?: boolean;
   };
   provenance_audit: {
     claim: string;

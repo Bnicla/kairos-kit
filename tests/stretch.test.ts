@@ -41,10 +41,10 @@ const exps = [parseExperience("01-acme.md", KB_FILE)];
 const resume = (bullets: string[]): GeneratedResume => ({
   resume: {
     header: { name: "Alex Sample", contact: "Chicago" },
-    executive_summary: "- **Product leader:** ships platforms with measured outcomes.",
+    executive_summary: "- **Role:** Principal Product Manager at Acme.",
     experience: [{ company: "Acme", title: "Principal Product Manager", dates: "2024 - 2026", bullets }],
-    education: [{ institution: "Westbrook", credential: "MBA" }],
-    skills: ["Evals"],
+    education: [],
+    skills: [],
   },
   provenance_audit: [{ claim: "platform", source_experience: "01-acme", prov: "R" }],
 });
@@ -179,8 +179,12 @@ describe("saveGeneratedResume + stretch", () => {
   });
 
   it("saves and returns stretch findings for the candidate to decide", async () => {
-    const r = await saveGeneratedResume(store, appId, resume(["**Verification:** Made citation verification mandatory for the agent."]));
+    // The line keeps the fact's own words and adds an absolute the fact does not state: saved, and listed for the candidate.
+    const r = await saveGeneratedResume(store, appId, resume(["**Verification:** Rewrote the agent's instructions so that a check of every court decision against the citation service was mandatory."]));
     expect(r.stretch.map((f) => f.trigger)).toEqual(["mandatory"]);
+    // A line that no fact holds at all is saved too, and returned for the Writer to put right before the draft is shown.
+    const none = await saveGeneratedResume(store, appId, resume(["**Verification:** Made citation verification mandatory for the agent."]));
+    expect(none.findings.put_right.map((f) => [f.kind, f.line])).toEqual([["line_with_no_origin", "**Verification:** Made citation verification mandatory for the agent."]]);
   });
 });
 
@@ -275,5 +279,59 @@ describe("verb swaps: the fact's nouns and numbers kept, the candidate's part ma
     // "Worked with the data team on the churn model" does not say who built it; "Built the churn model" drops the team
     // and claims no lead. The check lists a lead claim ("led", "owned") here, not a delivery verb.
     expect(check("Worked with the data team on the churn model for 200 enterprise accounts.", "Built the churn model for 200 enterprise accounts.")).toEqual([]);
+  });
+});
+
+/**
+ * Verbs stronger than the person's, from the run on other professions (15 November 2026): each line kept the
+ * fact's nouns and numbers, and each was saved without a finding. Invented people and employers.
+ */
+describe("verbs stronger than the person's own: the four of the run on other professions", () => {
+  const kb = (facts: string[], title = "Analyst") => [
+    parseExperience("01-acme.md", `---\nid: acme\ncompany: Acme\ntitle: ${title}\nstart: '2020'\nend: '2026'\n---\n\n## Achievements\n${facts.map((f) => `- ${f} [R]`).join("\n")}\n`),
+  ];
+  const doc = (summary: string, bullets: string[]): GeneratedResume => ({
+    resume: { header: { name: "A B", contact: "x" }, executive_summary: summary, experience: [{ company: "Acme", title: "Analyst", dates: "2020 - 2026", bullets }], education: [], skills: [] },
+    provenance_audit: [{ claim: "x", source_experience: "01-acme", prov: "R" }],
+  });
+  const found = (facts: string[], summary: string, bullets: string[], title?: string) => checkResumeStretch(doc(summary, bullets), kb(facts, title)).map((f) => `${f.rule}:${f.trigger} (${f.company})`);
+
+  const assistant = ["Held two office hours a week for a class of 120 students and graded programming assignments in Java.", "Wrote the autograder tests for 3 of the 8 assignments."];
+  const engagements = ["Analyst then consultant on 7 engagements: market sizing, customer surveys, cost benchmarking."];
+  const committee = ["Member of the site safety committee; the site went 410 days without a lost-time injury in 2023-2024.", "Cut mis-picks from 1.9% to 0.7% of order lines over 18 months."];
+  const teacher = ["Wrote the school's weekly family newsletter for four years; it went by email to about 1,400 families.", "Advised the student newspaper: 12 student writers, eight print issues a year and a website.", "Led the English department's move to a shared writing rubric across 6 teachers."];
+
+  it("an assistant who held office hours and graded did not teach the section", () => {
+    expect(found(assistant, "**Communication:** Taught a 120-student Data Structures section and wrote the autograder tests for 3 assignments.", [assistant[0]!], "Teaching Assistant, Data Structures")).toEqual(["ownership:taught (Executive summary)"]);
+    expect(found(assistant, "Teaching assistant.", ["Taught a class of 120 students and graded programming assignments in Java."])).toEqual(["ownership:taught (Acme)"]);
+    // A person whose fact says they taught may say so.
+    expect(found(["Taught five classes a year, about 150 students, in literature and composition."], "Teacher.", ["Taught literature and composition to about 150 students in five classes a year."])).toEqual([]);
+  });
+
+  it("an analyst on engagements did not run them", () => {
+    expect(found(engagements, "Consultant.", ["Ran market sizing, customer surveys and cost benchmarking across 7 engagements."])).toEqual(["drift:ran (Acme)"]);
+    expect(checkResumeStretch(doc("Consultant.", ["Ran market sizing, customer surveys and cost benchmarking across 7 engagements."]), kb(engagements))[0]!.detail).toBe(
+      'the knowledge base says "analyst then consultant on 7 engagements by market sizing customer surveys cost benchmarking": it names the candidate\'s role on it, the bullet says "ran"',
+    );
+    // The role kept, or a plain verb of work, is not a claim to have run them; nor is a lead the fact itself states.
+    expect(found(engagements, "Consultant.", ["Analyst then consultant on 7 engagements: market sizing, customer surveys, cost benchmarking."])).toEqual([]);
+    expect(found(engagements, "Consultant.", ["Worked on market sizing, customer surveys and cost benchmarking across 7 engagements."])).toEqual([]);
+    expect(found(["Workstream lead on 5 engagements for retail and consumer goods clients; teams of 2 to 3 consultants."], "Leads workstreams on retail and consumer goods engagements.", ["Led workstreams on 5 engagements for retail and consumer goods clients."])).toEqual([]);
+  });
+
+  it("a member of the committee did not keep the site's result: a result the fact gives to something else is not the candidate's doing", () => {
+    expect(found(committee, "- **Results:** Cut mis-picks from 1.9% to 0.7% of order lines in 18 months and kept the site at 410 days without a lost-time injury.", [committee[1]!])).toEqual(["drift:kept (Executive summary)"]);
+    expect(found(committee, "Supervisor.", ["Kept the site at 410 days without a lost-time injury in 2023-2024."])).toEqual(["drift:kept (Acme)"]);
+    expect(found(["Wrote the proposal sections on approach and team for 3 bids; the firm won 2."], "Consultant.", ["Won 2 of 3 bids with the proposal sections on approach and team."])).toEqual(["drift:won (Acme)"]);
+    // Said as the fact says it, the result stays the site's, and a passive clause's second verb stays with its subject.
+    expect(found(committee, "Supervisor.", ["Serves on the site safety committee; the site went 410 days without a lost-time injury in 2023-2024."])).toEqual([]);
+    expect(found(["The app was demonstrated to the class and used by classmates during the final two weeks of term."], "Student.", ["The app was demonstrated to the class and used by classmates during the final two weeks of term."])).toEqual([]);
+  });
+
+  it("a lead claimed in the middle of a sentence needs a fact that says the candidate led that", () => {
+    expect(found(teacher, "**Audience Writer:** English teacher leading the school's audience-facing writing, from a weekly family newsletter to the student newspaper.", [teacher[0]!])).toEqual(["ownership:leading (Executive summary)"]);
+    // The fact says they led it, or ran it.
+    expect(found(teacher, "English teacher, leading the English department's move to a shared writing rubric.", [teacher[0]!])).toEqual([]);
+    expect(found(["Run second shift at a 220,000 square foot distribution center: 34 associates and 3 team leads."], "Supervisor, now running a second shift of 34 associates and 3 team leads.", ["Run second shift at a 220,000 square foot distribution center."])).toEqual([]);
   });
 });

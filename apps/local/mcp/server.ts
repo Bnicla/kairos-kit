@@ -100,6 +100,8 @@ import {
 import { generatedResumeToMarkdown, markdownResumeToHtml } from "@kairos/engine/resume-render";
 import { markdownResumeToDocx, markdownLetterToDocx, type TemplateSpec } from "@kairos/engine/docx-render";
 import { checkProse, hardProseViolations } from "@kairos/engine/tools/prose-checks";
+import { leadingQuestions } from "@kairos/engine/tools/checks";
+import { resumeLengthPolicy } from "@kairos/engine/length-policy";
 import { loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
 import { worded, wordedText } from "@kairos/engine/wording";
 import { listTracks, resolveTrack, saveTrack, trackGuidance, TrackStatus, EvidenceMapItem, MAIN_TRACK_ID, MAX_ACTIVE_TRACKS } from "@kairos/engine/tracks";
@@ -110,7 +112,9 @@ import { SETUP_STATE_PATH, emptySetupState, setupStatus, type SetupState } from 
 import { reconcileSources, type RecordOnFile } from "@kairos/engine/setup/reconcile";
 import { htmlToPdf } from "@/lib/pdf";
 import { appFilePath, localRoot, withAppDir } from "@/lib/app-dir";
-import { askToSave, changedFields, clip, diffPreview, jsonDiff, markdownDiff, newLines, recordFileDiff, removedLines, type Confirmer } from "@/lib/record-confirm";
+import { askToSave, boxLimit, changedFields, clip, diffPreview, jsonDiff, markdownDiff, newLines, recordFileDiff, removedLines, tooLongFor, type ChoiceField, type Confirmer, type ElicitResult } from "@/lib/record-confirm";
+import { HOW, ONE_BY_ONE, importItems, partMessage, partsOf, summaryMessage, type ImportItem } from "@/lib/first-import";
+import { inSources, knownSources, phraseInSources, rememberSource } from "@/lib/import-source";
 import type { GeneratedResume } from "@kairos/engine/types";
 import type { ScoreReport } from "@kairos/engine/types";
 
@@ -156,12 +160,17 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 const stoppedResults = new WeakSet<object>();
 
+/** The text items of a profile field that is a list. */
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : []);
+
 /** Wrap a handler so a thrown error becomes an isError result, never a crash. */
 function guard<A>(fn: (args: A) => Promise<ToolResult>) {
   return async (args: A): Promise<ToolResult> => {
     try {
       return await fn(args);
     } catch (e) {
+      // A save refused by a check wrote nothing: it says so, and is not an error part of the way through a write.
+      if (e instanceof Error && e.name === "SaveRefused") return fail(`${msg(e)} Nothing was saved.`);
       const result = fail(msg(e));
       stoppedResults.add(result);
       return result;
@@ -294,6 +303,13 @@ const confirmer: Confirmer = {
     const call = currentCall.getStore();
     if (!call) throw new Error("no tool call in progress");
     return call.confirmer.elicit(params);
+  },
+  // What the client's own box shows of a message, when the call's confirmer says so (the hosted connector, for claude.ai).
+  get box() {
+    return currentCall.getStore()?.confirmer.box;
+  },
+  get noChoice() {
+    return currentCall.getStore()?.confirmer.noChoice;
   },
 };
 
@@ -639,6 +655,8 @@ server.registerTool(
     if (!doc.text || doc.text.trim().length < 100) {
       return fail(`${doc.name} had almost no extractable text (it may be a scanned image). Ask for a text-based copy, or paste the text.`);
     }
+    // Kept in memory: a first import says which of its lines stand in this document word for word (lib/import-source.ts).
+    rememberSource(storeInUse(), doc.name, doc.text);
     const state = (await store.readJson<SetupState>(SETUP_STATE_PATH)) ?? emptySetupState();
     if (!state.sources.some((x) => x.file === doc.name)) {
       state.sources.push({ file: doc.name, kind: doc.kind, read_at: new Date().toISOString().slice(0, 10) });
@@ -757,11 +775,14 @@ server.registerTool(
       return fail(`${fileName} already exists. Show the user the differences (reconcile_sources) and save only what they approve.`);
     }
     const fm = { ...(frontmatter as Record<string, unknown>) };
+    // A project of the person's own is headed by its name; with no part of theirs stated, its title is the word "Project".
+    const project = String(fm.kind ?? "").toLowerCase() === "project";
+    if (project && !String(fm.title ?? "").trim()) fm.title = "Project";
     const before = existing ? matter(existing) : null;
-    const role = [fm.title, fm.company].filter(Boolean).join(" at ") || fileName;
+    const role = (project ? `project ${fm.company ?? ""}`.trim() : [fm.title, fm.company].filter(Boolean).join(" at ")) || fileName;
     const refused = await askToSave(
       confirmer,
-      `${existing ? "update" : "add"} the role ${role} (${fileName})`,
+      `${existing ? "update" : "add"} the ${project ? "" : "role "}${role} (${fileName})`,
       recordFileDiff(before, fm, body, ["sources"]),
     );
     if (refused) return fail(refused);
@@ -842,89 +863,193 @@ server.registerTool(
   {
     title: "Save the first import",
     description:
-      "The first import into an empty knowledge base, approved once: the profile's name, contact line and headline, every role and every school read from the document the user just gave (or told in a first interview). The user is shown the whole list, every item in full, in ONE confirmation, and approves it once; if they decline, nothing is saved. Refused when the knowledge base already holds a role or a school: every later save asks one by one (save_experience, save_education, save_profile). Refused when the list is too long to show in full in one confirmation: then save the items one by one. Every file must be new. The map of the knowledge base is refreshed: do not call rebuild_index after it.",
+      "The first import into an empty knowledge base: the profile's name, contact line and headline, the document's own summary of the person, its list of skills and its languages, every role, every project of the person's own, and every education or credential entry (a degree, a licence, a certification) read from the document the user just gave (or told in a first interview). A title, an employer, a school or an issuer is the document's own: one that is not in the document is shown to the user as such. The user approves it in Kairos's own confirmation. When the document's text is known, that confirmation is a short summary: who, which jobs and entries, how many lines stand in their document word for word, and every line that does not, in full; they choose there to save all of it or to go through the items one by one. Otherwise the items are shown with every line, in as many confirmations as it takes, none cut. A part that is declined, or whose confirmation closes before an answer, saves nothing of that part, and what was approved before stays; call the tool again with the same items to offer what is left (what is saved is not asked again). Refused when the knowledge base holds any other role or education file: every later save asks by itself (save_experience, save_education, save_profile). Write every line of a role as the document says it, tagged [R], and add no line of your own. The map of the knowledge base is refreshed: do not call rebuild_index after it.",
     inputSchema: {
       profile: z
-        .object({ name: z.string().optional(), contact_line: z.string().optional(), headline: z.string().optional() })
+        .object({
+          name: z.string().optional(),
+          contact_line: z.string().optional(),
+          headline: z.string().optional(),
+          summary: z.string().max(1500).optional().describe("The document's own summary or objective about the person, word for word and complete; left out when it has none. Never a text of yours"),
+          skills: z.array(z.string()).max(80).optional().describe("The document's own list of skills (its Skills section), one item each, in its words, none left out and none added"),
+          languages: z.array(z.string()).max(20).optional().describe("The document's languages with their level, as it gives them, e.g. ['English (native)', 'Italian (fluent)']"),
+        })
         .optional()
-        .describe("The identity read from the document: name, contact line, and a headline in the document's own words"),
-      experiences: z.array(importItem).min(1).max(20).describe("Every role, as save_experience takes one"),
-      education: z.array(importItem).max(10).optional().describe("Every school or certification, as save_education takes one"),
+        .describe("What the document says of the person: name, contact line, a headline in the document's own words, its list of skills and its languages"),
+      experiences: z
+        .array(importItem)
+        .min(1)
+        .max(20)
+        .describe("Every role, as save_experience takes one. A project of the person's own (a capstone, a personal project) is an entry with frontmatter kind: 'project', company: the project's own name as the document writes it, and no title unless the document states the person's part: never a job title or an employer of your own"),
+      education: z.array(importItem).max(10).optional().describe("Every degree, licence or certification, as save_education takes one"),
       sources: z.array(z.string()).optional().describe("The documents the facts come from, e.g. ['resume.pdf'], or ['interview 2026-11-05']; added to every item's sources"),
     },
   },
   guard(async ({ profile, experiences, education = [], sources }) => {
-    // Only the first import: once the knowledge base holds a role or a school, each save is shown and approved by itself.
-    const [roles, schools] = await Promise.all([store.listFiles(["knowledge-base", "experiences"]).catch(() => []), store.listFiles(["knowledge-base", "education"]).catch(() => [])]);
-    const held = [...roles, ...schools].filter((f) => f.name.endsWith(".md")).length;
-    if (held) {
-      return fail(`The knowledge base already holds ${held} role or school file(s): this is not a first import. Save each item by itself (save_experience, save_education, save_profile), so that the user approves each one.`);
-    }
     const names = [...experiences, ...education].map((i) => i.fileName);
     const bad = names.filter((n) => !IMPORT_FILE.test(n));
     if (bad.length) return fail(`These file names are not accepted (letters, digits, dots, dashes, ending in .md): ${bad.join(", ")}`);
-    if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) return fail("Two items of the import carry the same file name. Give each role and each school its own file.");
+    if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) return fail("Two items of the import carry the same file name. Give each role and each education entry its own file.");
+
+    const withSources = (e: (typeof experiences)[number]) => {
+      const fm = { ...(e.frontmatter as Record<string, unknown>) };
+      const merged = mergeSources(fm.sources, sources);
+      if (merged.length) fm.sources = merged;
+      return fm;
+    };
+    // Only the first import: once the knowledge base holds a role or an education file, each save is shown and approved by itself.
+    // The one exception is this same import going on: a file it holds already, with the content this call would write, was
+    // approved in an earlier part and is not asked again. Any other file means the knowledge base is not empty.
+    const folder = { role: ["knowledge-base", "experiences"], education: ["knowledge-base", "education"] } as const;
+    const [roleFiles, educationFiles] = await Promise.all([store.listFiles([...folder.role]).catch(() => []), store.listFiles([...folder.education]).catch(() => [])]);
+    const sameAsSaved = new Set<string>();
+    let other = 0;
+    for (const [kind, files, inputs] of [["role", roleFiles, experiences], ["education", educationFiles, education]] as const) {
+      for (const f of files.filter((x) => x.name.endsWith(".md"))) {
+        const input = inputs.find((i) => i.fileName === f.name);
+        const raw = input ? await store.readFile([...folder[kind], f.name]) : null;
+        const was = raw ? matter(raw) : null;
+        if (input && was && recordFileDiff({ data: was.data, content: was.content }, withSources(input), input.body).length === 0) sameAsSaved.add(`${kind}/${f.name}`);
+        else other++;
+      }
+    }
+    if (other) {
+      return fail(`The knowledge base already holds ${other} role or education file(s) that are not part of this import: this is not a first import. Save each item by itself (save_experience, save_education, save_profile), so that the user approves each one.`);
+    }
 
     const existing = await readProfile();
-    const update = clean({ name: profile?.name, contact_line: profile?.contact_line, headline: profile?.headline }) as Record<string, unknown>;
+    const list = (v?: string[]) => {
+      const items = (v ?? []).map((x) => x.trim()).filter(Boolean);
+      return items.length ? items : undefined;
+    };
+    const update = clean({ name: profile?.name, contact_line: profile?.contact_line, headline: profile?.headline, summary: profile?.summary?.trim() || undefined, skills: list(profile?.skills), languages: list(profile?.languages) }) as Record<string, unknown>;
     const identity = changedFields(existing, update);
-    const roleOf = (fm: Record<string, unknown>, fileName: string) => [fm.title, fm.company].filter(Boolean).join(" at ") || fileName;
-    // Every item in full, in the order it will be saved: the user approves what they can read.
-    const lines: string[] = [];
-    if (identity.length) lines.push("Your profile:", ...identity.map((l) => `+ ${l}`), "");
-    experiences.forEach((e, i) => {
+    // A project is headed by its name. Where the document states no part of the person's in it, the entry's title is the word "Project".
+    for (const e of experiences) {
       const fm = e.frontmatter as Record<string, unknown>;
-      lines.push(`Role ${i + 1} of ${experiences.length}: ${roleOf(fm, e.fileName)} (${e.fileName})`, ...recordFileDiff(null, fm, e.body, ["sources"]).filter((l) => l !== "New or changed:"), "");
-    });
-    education.forEach((e, i) => {
-      lines.push(`School ${i + 1} of ${education.length}: ${e.fileName}`, ...recordFileDiff(null, e.frontmatter as Record<string, unknown>, e.body, ["sources"]).filter((l) => l !== "New or changed:"), "");
-    });
-    const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-    const what = `save your first import: ${[identity.length ? "your profile" : "", count(experiences.length, "role"), education.length ? count(education.length, "school") : ""].filter(Boolean).join(", ")}`;
-    const refused = await askToSave(confirmer, what, lines, "saves all of it to your knowledge base", "Decline if any of it is wrong: nothing is saved.");
-    if (refused) {
-      // A list too long for one confirmation is not cut: the items then go one by one.
-      return fail(/too long to show/.test(refused) ? `${refused} For a first import: call save_profile, then save_experience for each role and save_education for each school (expect_new: true).` : refused);
+      if (String(fm.kind ?? "").toLowerCase() === "project" && !String(fm.title ?? "").trim()) fm.title = "Project";
     }
+    // The store object itself, not the name every handler goes through: the documents are noted on the object (lib/import-source.ts).
+    const kb = storeInUse();
+    const documents = knownSources(kb);
+    const compared = documents.length > 0;
+    const items = importItems(identity, experiences, education, {
+      verbatim: (line) => (compared ? inSources(kb, line) : null),
+      named: (phrase) => (compared ? phraseInSources(kb, phrase) : null),
+      lists: { skills: identity.some((l) => l.startsWith("skills: ")) ? (update.skills as string[]) : undefined, languages: identity.some((l) => l.startsWith("languages: ")) ? (update.languages as string[]) : undefined },
+      ownSummary: identity.some((l) => l.startsWith("summary: ")) ? (update.summary as string) : undefined,
+      saved: (kind, item) => sameAsSaved.has(`${kind}/${item.fileName}`),
+    });
+    const box = confirmer.box;
+    const limits = { max: boxLimit(confirmer), aim: box?.aimChars ?? boxLimit(confirmer) };
 
     const saved: string[] = [];
     const untagged: { file: string; facts: unknown[] }[] = [];
-    try {
-      if (identity.length) {
-        await store.writeFile(["profile.md"], matter.stringify("# Candidate profile\n\nIdentity and targeting used to prioritize roles and ground generation.\n", { ...existing, ...update }));
-        saved.push("profile.md");
+    /** Writes the items of one approval; a failure part of the way throws with what was written before it. */
+    const save = async (list: ImportItem[]) => {
+      for (const item of list) {
+        if (item.kind === "profile") {
+          await store.writeFile(["profile.md"], matter.stringify("# Candidate profile\n\nIdentity and targeting used to prioritize roles and ground generation.\n", { ...existing, ...update }));
+          saved.push("profile.md");
+        } else if (item.kind === "role") {
+          const e = experiences.find((x) => x.fileName === item.fileName)!;
+          await saveExperience(store, { fileName: e.fileName, frontmatter: withSources(e) as never, body: e.body });
+          saved.push(worded`knowledge-base/experiences/${e.fileName}`);
+          const without = untaggedFacts(e.body);
+          if (without.length) untagged.push({ file: e.fileName, facts: without });
+        } else {
+          const e = education.find((x) => x.fileName === item.fileName)!;
+          await store.writeFile(["knowledge-base", "education", e.fileName], matter.stringify(`\n${e.body}\n`, withSources(e)));
+          saved.push(worded`knowledge-base/education/${e.fileName}`);
+        }
       }
-      for (const e of experiences) {
-        const fm = { ...(e.frontmatter as Record<string, unknown>) };
-        const merged = mergeSources(fm.sources, sources);
-        if (merged.length) fm.sources = merged;
-        await saveExperience(store, { fileName: e.fileName, frontmatter: fm as never, body: e.body });
-        saved.push(worded`knowledge-base/experiences/${e.fileName}`);
-        const without = untaggedFacts(e.body);
-        if (without.length) untagged.push({ file: e.fileName, facts: without });
-      }
-      for (const e of education) {
-        const fm = { ...(e.frontmatter as Record<string, unknown>) };
-        const merged = mergeSources(fm.sources, sources);
-        if (merged.length) fm.sources = merged;
-        await store.writeFile(["knowledge-base", "education", e.fileName], matter.stringify(`\n${e.body}\n`, fm));
-        saved.push(worded`knowledge-base/education/${e.fileName}`);
-      }
-    } catch (e) {
-      // The user approved the whole list; a failure part of the way is said with what was written, so that the rest can be saved one by one.
-      return fail(`The import stopped (${msg(e)}). Saved before it stopped: ${saved.join(", ") || "nothing"}. Save the remaining items one by one (save_experience, save_education).`);
+    };
+    const before = items.filter((i) => i.saved).map((i) => i.name);
+    const todo = items.filter((i) => !i.saved);
+    const lines = todo.flatMap((i) => (i.kind === "profile" ? [] : i.lines));
+    const done = async (how: string, asked: number, notShown: ImportItem[] = []) => {
+      const indexed = saved.length ? await regenerateIndexMap(store).then(() => true, () => false) : false;
+      return ok({
+        ok: true,
+        saved,
+        roles: experiences.length,
+        // Degrees, licences and certifications together: not "schools".
+        education: education.length,
+        approved: how,
+        confirmations: asked,
+        ...(before.length ? { already_saved: before } : {}),
+        ...(compared ? { lines: { total: lines.length, word_for_word: lines.filter((l) => l.verbatim).length, claude_wording: lines.filter((l) => l.verbatim === false).map((l) => l.text) } } : {}),
+        ...(notShown.length
+          ? { not_saved: notShown.map((i) => i.name), not_saved_note: "Each of these is longer than one confirmation shows, and a change is never shown cut. Save it by itself in two steps (save_experience or save_education): first with part of its lines, then again with the rest added." }
+          : {}),
+        index_refreshed: indexed,
+        ...(untagged.length
+          ? { untagged_facts: untagged, untagged_note: "These fact lines carry no provenance tag and are not used as evidence until tagged. Ask the user about each one." }
+          : {}),
+      });
+    };
+    if (!todo.length) return done("nothing left to approve", 0);
+    if (!confirmer.supportsElicitation()) {
+      const refused = await askToSave(confirmer, "save your first import", ["(nothing can be shown)"]);
+      return fail(refused ?? "Nothing was saved.");
     }
-    const indexed = await regenerateIndexMap(store).then(() => true, () => false);
-    return ok({
-      ok: true,
-      saved,
-      roles: experiences.length,
-      schools: education.length,
-      index_refreshed: indexed,
-      ...(untagged.length
-        ? { untagged_facts: untagged, untagged_note: "These fact lines carry no provenance tag and are not used as evidence until tagged. Ask the user about each one." }
-        : {}),
-    });
+    /** One confirmation. "yes" with what the user chose, or why nothing of it is saved. */
+    const ask = async (message: string, properties: Record<string, ChoiceField> = {}): Promise<{ yes: true; content: Record<string, unknown> } | { yes: false; why: string }> => {
+      let r: ElicitResult;
+      try {
+        r = await confirmer.elicit({ message, requestedSchema: { type: "object", properties } });
+      } catch (e) {
+        return { yes: false, why: `the confirmation could not be shown (${msg(e)})` };
+      }
+      if (r.action === "accept") return { yes: true, content: r.content ?? {} };
+      return { yes: false, why: r.action === "cancel" ? "the confirmation was closed before an answer (a client can close it by itself after about a minute)" : "the user declined it" };
+    };
+    const stopped = async (why: string, part?: { n: number; of: number; rest: ImportItem[] }) => {
+      if (saved.length) await regenerateIndexMap(store).catch(() => undefined);
+      const kept = [...before, ...saved];
+      return fail(
+        [
+          part ? `Part ${part.n} of ${part.of} was not saved: ${why}.` : `${kept.length ? "Nothing more was saved" : "Nothing was saved"}: ${why}.`,
+          kept.length ? `Saved before it and kept: ${kept.join(", ")}.` : "",
+          part && part.rest.length ? `Not saved: ${part.rest.map((i) => i.name).join("; ")}.` : "",
+          "Ask the user what they want. To offer what is left again, call save_first_import again with the same items: what is saved already is not asked again. Do not call it again unless they ask.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    };
+
+    try {
+      // The summary: read at a glance, with every line that is not in the user's document in full, and the choice to go one by one.
+      let oneByOne = false;
+      let asked = 0;
+      const choice = !confirmer.noChoice;
+      const summary = summaryMessage(items, documents, box, choice);
+      if (summary && !tooLongFor(confirmer, summary)) {
+        asked++;
+        const r = await ask(summary, choice ? { how: HOW } : {});
+        if (!r.yes) return stopped(r.why);
+        if (r.content.how !== ONE_BY_ONE) {
+          const { tooLong } = partsOf(todo, compared, limits, box);
+          await save(todo.filter((i) => !tooLong.includes(i)));
+          return done("all at once, from the summary", asked, tooLong);
+        }
+        oneByOne = true;
+      }
+      // Item by item: the user asked for it, or there is no document to compare the lines with, or the summary itself was too long.
+      const { parts, tooLong } = partsOf(items, compared, { ...limits, apart: oneByOne }, box);
+      for (const [k, part] of parts.entries()) {
+        if (part.every((i) => i.saved)) continue;
+        asked++;
+        const r = await ask(partMessage(part, k + 1, parts.length, compared, box));
+        if (!r.yes) return stopped(r.why, parts.length > 1 ? { n: k + 1, of: parts.length, rest: parts.slice(k).flat().filter((i) => !i.saved) } : undefined);
+        await save(part.filter((i) => !i.saved));
+      }
+      return done(oneByOne ? "one by one" : parts.length > 1 ? "in parts" : "all at once", asked, tooLong.filter((i) => !i.saved));
+    } catch (e) {
+      // A failure part of the way is said with what was written, so that the rest can be offered again.
+      return fail(`The import stopped (${msg(e)}). Saved before it stopped: ${saved.join(", ") || "nothing"}. Call save_first_import again with the same items to offer the rest: what is saved already is not asked again.`);
+    }
   }),
 );
 
@@ -1073,8 +1198,27 @@ server.registerTool(
         update[k] = { ...(was as Record<string, unknown>), ...clean(update[k] as Record<string, unknown>) };
       }
     }
+    // Choices kept for every résumé: the entries given are added to those on file (or taken off, with `remove`), each
+    // with the day, and shown one per line in the user's own words.
+    const choiceLines: string[] = [];
+    if (Array.isArray(update.resume_choices)) {
+      const was = Array.isArray(existing.resume_choices) ? (existing.resume_choices as { key: string; says?: string; since?: string }[]) : [];
+      const given = update.resume_choices as { key: string; says?: string; remove?: boolean }[];
+      const kept = was.filter((c) => !given.some((g) => g.key.trim().toLowerCase() === String(c.key).trim().toLowerCase()));
+      for (const g of given) {
+        const key = g.key.trim().toLowerCase();
+        const before = was.find((c) => String(c.key).trim().toLowerCase() === key);
+        if (g.remove) {
+          if (before) choiceLines.push(`- no longer kept on every résumé: ${before.says ?? before.key}`);
+          continue;
+        }
+        kept.push({ key, ...(g.says?.trim() ? { says: g.says.trim() } : before?.says ? { says: before.says } : {}), since: before?.since ?? new Date().toISOString().slice(0, 10) });
+        if (!before) choiceLines.push(`+ kept on every résumé, and not raised again: ${g.says?.trim() || key}`);
+      }
+      update.resume_choices = kept;
+    }
     const merged = { ...existing, ...update };
-    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip(changedFields(existing, update)));
+    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip([...changedFields(existing, update, ["resume_choices"]), ...choiceLines]));
     if (refused) return fail(refused);
     const body =
       "# Candidate profile\n\nIdentity and targeting used to prioritize roles and ground generation.\n";
@@ -1707,6 +1851,9 @@ server.registerTool(
     // The guarded op validates the full ScoreReport shape (zod) and does the
     // status/band bookkeeping; an invalid report throws with actionable issues.
     const r = report as unknown as ScoreReport;
+    // A question that suggests its answer is not asked: the person answers what happened, not which of our examples fits.
+    // It does not stop the save: the score is saved, and the questions are returned to be reworded before they are asked.
+    const leading = leadingQuestions((Array.isArray(r?.gaps) ? r.gaps : []).map((g) => g?.clarifying_question));
     await saveScoredReport(store, appId, label ?? "Score", r);
     const referrals = await suggestReferrals(store, appId);
     return ok({
@@ -1715,6 +1862,14 @@ server.registerTool(
       label: label ?? "Score",
       band: r.match.overall_band,
       recommendation: r.recommendation,
+      ...(leading.length
+        ? {
+            questions_to_reword_before_asking: {
+              how: "These clarifying questions suggest an answer. Before you ask one, reword it: whether it happened, or where, in plain words, with no example answers and no tool, product or option the person did not name.",
+              items: leading.map((q) => ({ question: q.question, suggests: q.marker })),
+            },
+          }
+        : {}),
       ...(referrals
         ? {
             possible_referrals: {
@@ -1990,6 +2145,13 @@ server.registerTool(
       candidateName: typeof profile.name === "string" ? profile.name : undefined,
       contactLine: typeof profile.contact_line === "string" ? profile.contact_line : undefined,
       track: await trackFor(meta),
+      // The person's own lists: the Skills section starts from the first, and the second is kept as given.
+      statedSkills: strings(profile.skills),
+      languages: strings(profile.languages),
+      ownSummary: typeof profile.summary === "string" ? profile.summary : undefined,
+      // One page or two: by the years the knowledge base covers and by how much it holds, or the person's own setting.
+      // (Until 15 November 2026 nothing was passed, and every Writer was told to fill two pages.)
+      targetPages: resumeLengthPolicy(experiences, { override: profile.target_pages === 1 || profile.target_pages === 2 ? profile.target_pages : undefined }).targetPages,
     });
     return ok({ ...snapshotGuard(snapshot), system_prompt: wordedText(GENERATION_SYSTEM_PROMPT), user_message });
   }),
@@ -2000,10 +2162,12 @@ server.registerTool(
   {
     title: "Save a generated resume",
     description:
-      "Persist the GeneratedResume JSON you produced. Writes the structured resume (with provenance_audit and requirement_coverage), an editable markdown source, the resume.docx/.pdf masters, and submit-ready copies named <Candidate_Name>-<company>-resume.pdf/.docx (listed in submit_files: point the user to those, never to resume.pdf). Updates status to 'drafted'. The Word file carries the `headline` given, or the profile's when none is given, and the result has `docxPath` and `layout` (the measure check_resume_layout returns): after a save, render_docx and check_resume_layout need not be called. Each covered/partial requirement_coverage row must quote text that is on the résumé, or the save is rejected naming the row. A phrasing the knowledge base explicitly forbids (a quoted 'never say' line) rejects the save. A number that matches a metrics-register entry whose status is not allowed in documents (by default anything other than DEFENDED or SCOPE) rejects the save naming the entry. The .docx is rendered on the paper in the result's `paper` (profile.md `paper: letter | a4`; unset: US Letter for a United States search, A4 when the search includes other countries). The result's requirement_coverage gives counts by status and the gap list: report the gaps to the user. The result's stretch_check lists bullets and executive-summary sentences (company 'Executive summary') that claim more than the verified facts state: an ownership verb or absolute word (chose, drove, owned, mandatory, every, the first...) no verified fact supports, a wording stronger in kind than the knowledge base's (took part to led, assessed to put in place, pilot to rollout), a number attached to another result than the one the knowledge base gives it, a client or partner given as a place of work, or a total (years, a count across roles) that no line states. Ask the user keep / soften / drop for each, save a 'keep' with save_confirmed_fact, and re-save after soften/drop. The result's line_origins gives, for every bullet, role intro and summary sentence, whether code found the verified fact it comes from (counts: strong, partial, none; the facts themselves are saved in resume.json and shown on the dashboard). It does not block. Report the counts; for each line in no_origin ask the user which fact it rests on (save_confirmed_fact, then save again), or reword it closer to the knowledge base, or drop it; report each audit_disagreements entry (the provenance_audit names a source that holds no fact for that line).",
+      "Persist the GeneratedResume JSON you produced. The result lists what on the résumé differs from the knowledge base without stopping the save: put_right_before_showing (what you added yourself: put it right from the knowledge base and save again before showing the draft) and tell_the_user (what is left, and what the user asked for: tell them in plain words, with each item's `say`; it is theirs to keep). Nothing about the content stops the save. It is refused only when the input is not in the expected shape, or when storage fails. Writes the structured resume (with provenance_audit and requirement_coverage), an editable markdown source, the resume.docx/.pdf masters, and submit-ready copies named <Candidate_Name>-<company>-resume.pdf/.docx (listed in submit_files: point the user to those, never to resume.pdf). Updates status to 'drafted'. The Word file carries the `headline` given, or the profile's when none is given, and the result has `docxPath` and `layout` (the measure check_resume_layout returns): after a save, render_docx and check_resume_layout need not be called. Each covered/partial requirement_coverage row must quote text that is on the résumé, or the save is rejected naming the row. A phrasing the knowledge base explicitly forbids (a quoted 'never say' line) rejects the save. A number that matches a metrics-register entry whose status is not allowed in documents (by default anything other than DEFENDED or SCOPE) rejects the save naming the entry. The .docx is rendered on the paper in the result's `paper` (profile.md `paper: letter | a4`; unset: US Letter for a United States search, A4 when the search includes other countries). The result's requirement_coverage gives counts by status and the gap list: report the gaps to the user. The result's stretch_check lists bullets and executive-summary sentences (company 'Executive summary') that claim more than the verified facts state: an ownership verb or absolute word (chose, drove, owned, mandatory, every, the first...) no verified fact supports, a wording stronger in kind than the knowledge base's (took part to led, assessed to put in place, pilot to rollout), a number attached to another result than the one the knowledge base gives it, a client or partner given as a place of work, or a total (years, a count across roles) that no line states. Ask the user keep / soften / drop for each, save a 'keep' with save_confirmed_fact, and re-save after soften/drop. The result's line_origins gives, for every bullet, role intro and summary sentence, whether code found the verified fact it comes from (counts: strong, partial, none; the facts themselves are saved in resume.json and shown on the dashboard). It does not block. Report the counts; for each line in no_origin ask the user which fact it rests on (save_confirmed_fact, then save again), or reword it closer to the knowledge base, or drop it; report each audit_disagreements entry (the provenance_audit names a source that holds no fact for that line).",
     inputSchema: {
       appId: z.string(),
-      resume: z.record(z.string(), z.any()).describe("The full GeneratedResume JSON (incl. provenance_audit)"),
+      resume: z
+        .record(z.string(), z.any())
+        .describe('The whole GeneratedResume object, as the output contract of get_generation_evidence gives it: { "resume": { "header", "executive_summary", "experience", "education", "skills" }, "provenance_audit": [ ... ], "requirement_coverage": [ ... ], ... }. Not the inner "resume" object alone'),
       headline: z.string().optional().describe("Headline shown next to the name in the .docx, e.g. 'AI Product Builder'"),
     },
   },
@@ -2018,7 +2182,9 @@ server.registerTool(
     // With no headline given, the profile's: the same one render_docx writes, so the file needs no second render.
     const own = (await readProfile()).headline;
     const used = headline ?? (typeof own === "string" && own.trim() ? own : undefined);
-    const result = await saveGeneratedResume(store, appId, resume as unknown as GeneratedResume, { ...(used ? { headline: used } : {}), ...(Object.keys(design).length ? { template: design } : {}) });
+    // In a conversation nothing the knowledge base does not hold stops the save: it is returned, the Writer puts right
+    // what it added, and the rest is told to the user, whose résumé it is (the owner's decision of 15 November 2026).
+    const result = await saveGeneratedResume(store, appId, resume as unknown as GeneratedResume, { ...(used ? { headline: used } : {}), ...(Object.keys(design).length ? { template: design } : {}), whenItDiffers: "warn" });
     // Keep a submit-ready PDF next to the editable docx (best-effort; no-op if
     // LibreOffice is absent). The docx stays the master for quick manual tuning.
     const { renderDocxToPdf } = await import("@/lib/pdf-render");
@@ -2050,6 +2216,22 @@ server.registerTool(
         ? result.stretch.map((f) => ({ company: f.company, trigger: f.trigger, why: f.detail, bullet: f.bullet }))
         : "clean",
       line_origins: summarizeOrigins(result.origins),
+      // A line whose named source held no fact for it was put right in the saved audit: nothing to tell the user.
+      ...(result.sourcesCorrected ? { sources_corrected: result.sourcesCorrected } : {}),
+      // What differs from the knowledge base. Nothing here stopped the save: how a person presents themselves is theirs to decide.
+      put_right_before_showing: {
+        how: "The résumé is saved. Each of these is something on it that the knowledge base does not hold: an employer, a number, a number the user's register withholds, a phrasing they forbade, a title, dates, a count of years, a skill, a stronger verb, a writing rule. If you wrote it yourself, put it right from the knowledge base and save again before you show the draft; `what` says how. If the user asked for it themselves, change nothing: it is theirs (see tell_the_user).",
+        items: result.findings.put_right,
+      },
+      tell_the_user: {
+        how: "What is left after you put your own additions right, and what the user asked for, is told to them: which line, what differs from their knowledge base, in plain words, with no judgement and no \"you must\". Each item's `say` is that sentence: use it. Tell them every time, also for something they kept on an earlier résumé, unless it is in their remembered choices. If they say keep it, it stays as saved. If it is a choice that will come back on every résumé, offer to remember it: save_profile({ resume_choices: [{ key, says }] }) with the item's key and their own words; it is then not raised again. If they give a fact that makes it true, save it (save_confirmed_fact) and save the résumé again.",
+        items: result.findings.tell_user,
+      },
+      ...(result.findings.kept_by_choice.length ? { kept_by_the_users_choice: { how: "Not raised: the user chose to keep these on every résumé (profile resume_choices; save_profile with remove: true forgets one).", count: result.findings.kept_by_choice.length } } : {}),
+      fill_note:
+        "A page that is not full is the right result when every fact of the knowledge base that fits this job is on the résumé. Never add, repeat or stretch a line to fill a page; to have more to say, ask the person about their work and save what they tell you.",
+      say_to_user:
+        "These field names are Kairos's own words. To the user, say what they mean: 'every line rests on something you told me'; 'this line says more than what you told me'; 'I could not find where this line comes from'. Never say provenance, audit, stretch check, line origins, grounding, source file or tagged.",
       requirement_coverage: result.coverage
         ? {
             covered: result.coverage.covered,

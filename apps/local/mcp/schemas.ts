@@ -14,6 +14,24 @@ export const saveProfileShape = {
     .array(z.string())
     .optional()
     .describe("Languages with level, e.g. ['English (native)', 'Spanish (professional)']; given to scoring"),
+  resume_choices: z
+    .array(
+      z.object({
+        key: z.string().describe("The `key` of the finding as save_resume returned it, or a whole family: 'skills|*' for every item of the skills line"),
+        says: z.string().optional().describe("The choice in the user's own words, e.g. 'My last role stays written to Present'"),
+        remove: z.boolean().optional().describe("true: forget this choice, so that the difference is raised again"),
+      }),
+    )
+    .optional()
+    .describe("Choices the user made once for every résumé: a difference from their knowledge base that they want kept (their last role written to Present, a skills line of their own). save_resume no longer raises a difference kept here. Only on the user's own word; the entries given are added to those on file"),
+  summary: z
+    .string()
+    .optional()
+    .describe("What the person says of themselves in a sentence or two, word for word: their résumé's own summary or objective, or their own words in conversation. Never a text of yours. A count of years they state there (\"seven years in corporate finance\") is their figure, and a résumé keeps it"),
+  skills: z
+    .array(z.string())
+    .optional()
+    .describe("The person's own list of skills, each item in their own words, as their résumé's skills section or they themselves gave it (e.g. ['SQL (PostgreSQL)', 'Git', 'Excel (pivot tables)']). The whole list each time: it replaces the one on file. Given to scoring as stated skills; a résumé's Skills section starts from it"),
   target_roles: z.array(z.string()).optional(),
   target_seniority: z.string().optional(),
   role_shape_preference: z

@@ -57,10 +57,10 @@ end: '2022'
 const RESUME: GeneratedResume = {
   resume: {
     header: { name: "Alex Sample", contact: "Chicago" },
-    executive_summary: "- **Product leader:** ships platforms with measured outcomes.",
+    executive_summary: "- **Role:** Product Manager at Acme.",
     experience: [{ company: "Acme", title: "Product Manager", dates: "2020 – 2022", bullets: ["Delivered $20M in savings."] }],
-    education: [{ institution: "Westbrook", credential: "MBA" }],
-    skills: ["Platforms"],
+    education: [],
+    skills: [],
   },
   provenance_audit: [{ claim: "savings", source_experience: "01-acme-pm", prov: "R" }],
 };

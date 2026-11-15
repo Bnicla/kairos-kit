@@ -79,7 +79,18 @@ export interface StretchFinding {
   detail: string;
 }
 
-type VerbClass = "responsibility" | "decision" | "initiative";
+type VerbClass = "responsibility" | "decision" | "initiative" | "charge";
+
+/**
+ * Findings that stop the save since the guardrails of 15 November 2026: the knowledge base says less than the line
+ * does, in kind. It says the person took part, supported, assisted, was a member or shared the work, and the line
+ * leads, owns, runs or does the thing; it says it was assessed or piloted, and the line puts it in place; it gives a
+ * result to something else, and the line makes it the person's doing; it names their role, and the line runs it; or
+ * the line says they taught, and no fact does. The way through is the person's own confirmation of the stronger
+ * fact, saved as theirs: never a rewording. An ownership verb or an absolute that no fact supports, a number on
+ * another result, a client as a place of work and a total stay the person's to decide (keep, soften, drop).
+ */
+export const claimsMoreThanTheFact = (f: StretchFinding): boolean => f.kind === "stretch" && (f.rule === "drift" || (f.rule === "ownership" && TRIGGERS.charge.includes(f.trigger)));
 
 /**
  * Ownership verbs that trigger a check, by what they claim. Swaps between
@@ -99,6 +110,9 @@ const TRIGGERS: Record<VerbClass, string[]> = {
     "drove", "drives", "spearheaded", "championed", "pioneered", "initiated", "established",
     "conceived", "invented", "architected", "founded", "cofounded",
   ],
+  // The candidate taught the class themselves (15 November 2026: a teaching assistant who held office hours and
+  // graded became "Taught a 120-student section"). Only a fact that says they taught supports it.
+  charge: ["taught", "teaches", "instructed", "lectured"],
 };
 
 const DELIVERY = [
@@ -112,12 +126,27 @@ const CLASS_OF = new Map<string, VerbClass>(
   (Object.entries(TRIGGERS) as [VerbClass, string[]][]).flatMap(([cls, vs]) => vs.map((v) => [v, cls] as const)),
 );
 
+// The verbs of charge are not ownership verbs: a fact that says "owned" or "led" does not say "taught".
 const ALL_TRIGGERS = [...TRIGGERS.responsibility, ...TRIGGERS.decision, ...TRIGGERS.initiative];
 const SUPPORTS: Record<VerbClass, Set<string>> = {
   responsibility: new Set([...ALL_TRIGGERS, ...DELIVERY]),
   decision: new Set(TRIGGERS.decision),
   initiative: new Set([...ALL_TRIGGERS, ...DELIVERY]),
+  // A fact that names the candidate as the one who teaches supports it; "teaching assistant" does not.
+  charge: new Set([...TRIGGERS.charge, "teach", "lecturer", "lecture", "lectures", "instructor", "professor", "teacher", "tutor", "tutored"]),
 };
+
+/**
+ * "…, leading the school's audience-facing writing", "now running a second shift": a lead claimed in the middle
+ * of a sentence, where the clause rules do not look (15 November 2026). Supported by a verified sentence that
+ * holds a word of leading and shares the objects.
+ */
+const LEAD_GERUNDS = new Set(["leading", "managing", "heading", "directing", "overseeing", "running", "supervising"]);
+const LEAD_SUPPORT = new Set([
+  "led", "leads", "lead", "leading", "leader", "ran", "runs", "run", "running", "managed", "manages", "manage", "managing", "manager",
+  "headed", "head", "heading", "directed", "director", "directing", "oversaw", "oversees", "oversee", "overseeing", "supervised", "supervise",
+  "supervisor", "supervising", "chaired", "chair", "owned", "owns", "owner", "responsible", "captain", "president", "founder", "founded",
+]);
 
 /** Objects that make any ownership verb a claim to have made the call. */
 const DECISION_OBJECTS = new Set(["decision", "call", "choice"]);
@@ -334,6 +363,48 @@ interface Drift {
   detail: string;
 }
 
+/** Forms of a verb that state what something did or was, beyond the past forms `isVerb` reads. */
+const FINITE = new Set(["went", "was", "were", "is", "are", "has", "had", "rose", "fell", "won", "became", "dropped", "stayed", "remained", "stood", "came"]);
+const OTHER_SUBJECTS = new Set(["the", "a", "an", "its", "their", "it", "they", "this", "that", "these", "those"]);
+/**
+ * A verified sentence whose subject is not the candidate: "the site went 410 days without a lost-time injury",
+ * "the firm won 2", "a partner led the engagement". It states a result; it does not say the candidate brought it about.
+ */
+const anothersResult = (s: string[]) => {
+  if (s.includes("i") || !OTHER_SUBJECTS.has(s[0]!)) return false;
+  // The subject is another party, named in the first words: "the plant manager", "the firm", "a partner", "the site",
+  // "the client's pilot". A sentence that opens on a thing of the candidate's own ("the dashboard …", "a new model:
+  // designed and shipped …") is not read this way: it stopped real lines when it was (15 November 2026).
+  const agent = s.slice(1, 4).findIndex((w) => OTHER_PARTIES.has(w));
+  if (agent < 0) return false;
+  const rest = s.slice(agent + 2, agent + 10);
+  const verb = rest.findIndex((w) => isVerb(w) || FINITE.has(w));
+  const label = rest.indexOf("by");
+  return verb >= 0 && (label < 0 || verb < label);
+};
+const OTHER_PARTIES = new Set(
+  (
+    "manager managers director directors partner partners team teams client clients firm company cfo ceo coo cto vp owner controller controllers teammate teammates " +
+    "colleague colleagues engineers engineer staff committee board customer customers vendor vendors agency department site plant store school district division " +
+    "group unit supervisor principal professor founder founders leadership executives investors buyer buyers supplier suppliers"
+  ).split(" "),
+);
+
+const ROLE_NOUNS = new Set([
+  "analyst", "consultant", "associate", "assistant", "intern", "coordinator", "specialist", "member", "engineer", "developer",
+  "representative", "clerk", "technician", "operator", "volunteer", "contributor", "participant", "researcher", "writer", "designer",
+]);
+/**
+ * A verified sentence that names the candidate's role on something and no action of theirs: "Analyst then
+ * consultant on 7 engagements: market sizing, customer surveys". Not a field of the entry ("title: …").
+ */
+const namesARole = (s: string[]) => {
+  if (s[1] === "by") return false;
+  const by = s.indexOf("by");
+  const head = by > 0 ? s.slice(0, by) : s;
+  return head.slice(0, 4).some((w) => ROLE_NOUNS.has(w)) && !s.some((w) => isVerb(w) || FINITE.has(w) || LEAD_SUPPORT.has(w));
+};
+
 /**
  * One clause of a bullet against the verified sentences of its employer. The
  * clause is matched to the sentences that share the most content words with
@@ -341,13 +412,26 @@ interface Drift {
  * the weaker kind, the bullet keeps no word of that kind, and no other
  * verified sentence supports the stronger verb with the same objects.
  */
-function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], verbOnly = false): Drift | null {
+function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], verbOnly = false, sub = false): Drift | null {
   // "Sole owner of …", "Single-handedly ran …": the word of degree is the absolutes' to judge; the claim is the word after it.
   const from = ts[0] === "i" ? 1 : 0;
   const verb = ts[from] === "sole" || ts[from] === "solely" ? ts[from + 1] : ts[from];
   if (!verb) return null;
   // A summary clause often opens on a noun ("Card authorization for …"): only a verb can drift.
   if (verbOnly && !isVerb(verb)) return null;
+  // Another's action, now the candidate's, read from the verb: the clause opens on a verb that the knowledge base
+  // gives to something else ("the firm won 2" becoming "Won 2 of 3 bids", "the plant manager presented it" becoming
+  // "and presented it") and to the candidate nowhere for this thing. Read before the clause's own words are counted:
+  // such a clause is often two words long.
+  if (isVerb(verb)) {
+    const theirs = sentences.filter((x) => anothersResult(x) && x.some((w) => sameAction(w, verb)));
+    const about = new Set(contentWords(tokens(bulletNorm)));
+    const own = sentences.filter((x) => !anothersResult(x) && x.some((w) => sameAction(w, verb)) && x.filter((w) => about.has(stem(w))).length >= 2);
+    if (theirs.length && !own.length) {
+      const said = theirs[0]!.filter((t) => t !== "r").slice(0, 14).join(" ");
+      return { trigger: verb, detail: `the knowledge base says "${said}": it states that result, not that the candidate brought it about, and the bullet says "${verb}"` };
+    }
+  }
   const words = [...new Set(contentWords(ts.slice(ts.indexOf(verb) + 1)))];
   if (words.length < 2) return null;
   let best = 0;
@@ -374,9 +458,11 @@ function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], ve
     // itself, unless it is the candidate's own action, which the sentence states after "by".
     const ownAction = by > 0 && matches.every((m) => m.indexOf("by") > 0 && m.slice(m.indexOf("by") + 1).some((w) => sameAction(w, verb)));
     const doesIt = isVerb(verb) && !ownAction;
-    const leads = LEAD_VERBS.has(verb) || (!verbOnly && LEAD_NOUNS.has(verb));
+    // In the second action of a line ("wrote the test plan and ran the sessions"), a verb the fact gives the candidate
+    // after "by" is their own, also when it is a verb of leading: "ran acceptance sessions" is what they did.
+    const leads = (LEAD_VERBS.has(verb) && !(sub && ownAction)) || (!verbOnly && LEAD_NOUNS.has(verb));
     const others = sentences.filter((x) => !startsWithAny(x, PARTICIPATION_OPENERS));
-    if ((leads || takesTeamsVerb || doesIt) && !supported(others, LEAD_VERBS, words.slice(0, 4)) && !supported(others, [verb], words.slice(0, 4))) {
+    if ((leads || (takesTeamsVerb && !(sub && ownAction)) || doesIt) && !supported(others, LEAD_VERBS, words.slice(0, 4)) && !supported(others, [verb], words.slice(0, 4))) {
       return { trigger: verb, detail: `the knowledge base says "${quote(s)}": the candidate took part, the bullet says "${verb}"` };
     }
   }
@@ -390,6 +476,23 @@ function clauseDrift(ts: string[], bulletNorm: string, sentences: string[][], ve
     const others = sentences.filter((x) => !startsWithAny(x, SHARED_OPENERS) && !startsWithAny(x, PARTICIPATION_OPENERS));
     if (alone && !supported(others, LEAD_VERBS, words.slice(0, 4)) && !supported(others, [verb], words.slice(0, 4))) {
       return { trigger: verb, detail: `the knowledge base says "${quote(s)}": the work was shared, the bullet says "${verb}" alone` };
+    }
+  }
+  // Another's result, now the candidate's doing: "the site went 410 days without a lost-time injury" becoming
+  // "kept the site at 410 days" (15 November 2026).
+  if (isVerb(verb) && matches.every(anothersResult)) {
+    const s = matches[0]!;
+    const own = sentences.filter((x) => !anothersResult(x));
+    if (!supported(own, [verb], words.slice(0, 4)) && !supported(own, LEAD_VERBS, words.slice(0, 4))) {
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": it states that result, not that the candidate brought it about, and the bullet says "${verb}"` };
+    }
+  }
+  // A role on something, now running it: "Analyst then consultant on 7 engagements: market sizing" becoming "Ran market sizing".
+  if (LEAD_VERBS.has(verb) && matches.every(namesARole)) {
+    const s = matches[0]!;
+    const others = sentences.filter((x) => !namesARole(x));
+    if (!supported(others, LEAD_VERBS, words.slice(0, 4))) {
+      return { trigger: verb, detail: `the knowledge base says "${quote(s)}": it names the candidate's role on it, the bullet says "${verb}"` };
     }
   }
   // Assessed, now in place.
@@ -657,12 +760,28 @@ export function checkResumeStretch(
     const seen = new Set<string>();
     const bulletNorm = norm(bullet);
     for (const ts of clauses(bullet)) {
-      const drift = clauseDrift(ts, bulletNorm, sentences, summary);
-      if (drift && !seen.has(`drift:${drift.trigger}`)) {
-        seen.add(`drift:${drift.trigger}`);
-        seen.add(drift.trigger); // one finding per verb: the drift names the knowledge base's own sentence
-        flag("drift", drift.trigger, drift.detail);
+      // The clause, and each part of it that starts a new action of the candidate's ("cut mis-picks … and kept the site …").
+      // Only where the clause is the candidate's own action: after "the app was demonstrated to the class and used by
+      // classmates", "used" is still the app's.
+      // (A clause can also start in the middle of the candidate's own sentence, after the full stop of "1.9%".)
+      const own = !OTHER_SUBJECTS.has(ts[0]!);
+      const starts = [0, ...(own ? ts.flatMap((w, i) => ((w === "and" || w === "then") && i > 0 && ts[i + 1] !== undefined && isVerb(ts[i + 1]!) ? [i + 1] : [])) : [])];
+      for (const [k, at] of starts.entries()) {
+        const drift = clauseDrift(ts.slice(at, starts[k + 1] !== undefined ? starts[k + 1]! - 1 : undefined), bulletNorm, sentences, summary || at > 0, at > 0);
+        if (drift && !seen.has(`drift:${drift.trigger}`)) {
+          seen.add(`drift:${drift.trigger}`);
+          seen.add(drift.trigger); // one finding per verb: the drift names the knowledge base's own sentence
+          flag("drift", drift.trigger, drift.detail);
+        }
       }
+      ts.forEach((w, i) => {
+        // A lead claimed in the middle of a sentence ("…, leading the school's writing").
+        if (!LEAD_GERUNDS.has(w) || seen.has(w)) return;
+        const objects = objectWords(ts, i, 0);
+        if (objects.length < 2 || supported(sentences, LEAD_SUPPORT, objects)) return;
+        seen.add(w);
+        flag("ownership", w, `no verified ${of}fact says the candidate led ${objects.slice(0, 3).join(" / ")}`);
+      });
       ts.forEach((w, i) => {
         // Ownership verb, only where the candidate is its implied subject:
         // the start of a clause or right after "and"/"then".

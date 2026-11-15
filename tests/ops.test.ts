@@ -27,10 +27,10 @@ end: '2022'
 const resume = (bullets: string[]): GeneratedResume => ({
   resume: {
     header: { name: "Alex Sample", contact: "Chicago" },
-    executive_summary: "- **Product leader:** ships platforms with measured outcomes.",
+    executive_summary: "- **Role:** Product Manager at Acme.",
     experience: [{ company: "Acme", title: "Product Manager", dates: "2020 – 2022", bullets }],
-    education: [{ institution: "Westbrook", credential: "MBA" }],
-    skills: ["Platforms"],
+    education: [],
+    skills: [],
   },
   provenance_audit: [{ claim: "savings", source_experience: "01-acme-pm", prov: "R" }],
 });
@@ -181,9 +181,9 @@ describe("saveGeneratedResume: word floor follows the page target", () => {
   const studentResume = (): GeneratedResume => ({
     resume: {
       header: { name: "Sam Student", contact: "Denver" },
-      executive_summary: "- **Analyst:** builds reports people use.",
+      executive_summary: "- **Analyst:** Built a weekly SQL report.",
       experience: roles.map((c) => ({ company: c, title: "Analyst Intern", dates: "2024 – 2025", bullets: ["Built a weekly SQL report."] })),
-      education: [{ institution: "State University", credential: "B.S. Statistics" }],
+      education: [],
       skills: ["SQL"],
     },
     provenance_audit: [{ claim: "report", source_experience: "01-northwind", prov: "R" }],

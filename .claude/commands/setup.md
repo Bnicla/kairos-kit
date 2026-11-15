@@ -45,7 +45,7 @@ when asked." Then stop.
 3. **Disagreements become numbered questions.** If `reconcile_sources` returns
    `questions`, show them all in one message, numbered as returned, each with
    the options and which document says what. Wait for the answers. Save nothing
-   about a role or school that has an open question.
+   about a role or an education entry that has an open question.
 4. **Additions and conflicts stay apart.** Items with status `additive` (the
    knowledge base has them; a new document only adds a date, a place or a source) go in
    their own short list: "These would be added to what you already have:".
@@ -114,28 +114,46 @@ until the 14 parts.
    choose "Always allow" in Claude's box for the Kairos tools that only read
    (loading, showing, getting the evidence), and that every save to their
    knowledge base still asks each time. Never suggest it for a tool that
-   writes.
+   writes. When their first message already holds the résumé and the job ad,
+   say these things, and who does what (step 0), in a few lines before the
+   first tool of step 2: never after the résumé is written.
 2. **Biographer: the knowledge base from the résumé.** `prepare_extraction`,
    follow its `system_prompt`. With one document and an empty knowledge base
    there is nothing to compare: do not call `reconcile_sources`. Save what the
    résumé says, as it says it, every fact tagged `[R]`, and nothing else, in
    one call: `save_first_import({ profile: { name, contact_line, headline },
    experiences: [...], education: [...], sources })`, the headline built from
-   the résumé's own words. The student sees the whole list, every item in
-   full, in one confirmation, and approves it once. Ask no question before
-   it: they read it and decline if something is wrong. If they decline, ask
-   what is wrong, correct it and offer it again. If the tool answers that the
-   list is too long for one confirmation, save one by one instead:
-   `save_profile`, then `save_experience` for each role and `save_education`
-   for each school (`expect_new: true`). After this first import every save
-   to the knowledge base asks by itself. The voice profile, the skills review, the numbers and
-   every setting wait for the 14 parts.
+   the résumé's own words. Every line of a role is the résumé's own line, word
+   for word; write no summary and no note of your own. `education` holds every
+   degree, licence and certification: call none of them a "school" unless it
+   is one, and give one a school or an issuer only when the résumé names it.
+   `profile.summary` is the résumé's own summary of the person, word for
+   word (a count of years they state there is their figure). `profile.skills`
+   is the résumé's own list of skills, item by item in its words, and
+   `profile.languages` its languages: leave nothing out and add nothing. A project of their own (a capstone, a personal project) is an
+   entry with `kind: "project"`, `company` set to the project's own name, and
+   no title unless the résumé states their part: never a job title or an
+   employer of your own. Every title and employer is the résumé's, as
+   written. The student approves in Kairos's confirmation: a short summary
+   (who, which jobs and entries, how many lines are word for word from their
+   document, and in full every line and every skill that is not), where they
+   choose to save all of it or to see each item one by one. Tell them so in
+   one line before the call, and ask no question before it. If they decline,
+   ask what is wrong, correct it and offer it again. If the confirmation
+   closed before they answered, or a part was declined, the result says what
+   is saved and what is not: ask what they want, and call `save_first_import`
+   again with the same items to offer the rest (what is saved is not asked
+   again). An item the result names in `not_saved` is longer than one
+   confirmation shows: save it by itself in two steps (`save_experience` with
+   part of its lines, then again with the rest). After this first import
+   every save to the knowledge base asks by itself. The voice profile, the
+   skills review, the numbers and every setting wait for the 14 parts.
    **No résumé:** a short interview instead. Ask for the two or three
    experiences that matter most for the job ad, one at a time: for a student,
    studies, projects, clubs, part-time work and volunteering count; for someone
    changing field, the roles closest to the new field. For each: organization,
-   title, start and end month, what they did themselves, one result. Then the
-   schools, in one question. Every fact tagged `[C]`, source
+   title, start and end month, what they did themselves, one result. Then
+   their degrees, licences and certifications, in one question. Every fact tagged `[C]`, source
    `interview <YYYY-MM-DD>`. Same saves.
 3. **Assessor: the score.** `/score` steps 3 to 5 on the job ad (capture,
    score, save). Report in a few lines: the band and confidence, the two
@@ -143,7 +161,8 @@ until the 14 parts.
    plainly and ask whether to write the résumé anyway or to try another ad.
    Otherwise go on without asking.
 4. **Writer: the résumé.** `/tailor` steps 2 to 5: write it, save it, render
-   the Word file, check the layout, and say where the file is. Report the
+   the Word file, check the layout, and say where the file is and that it is
+   the file to send. Report the
    coverage counts in one line, then only what needs the student's decision
    (each stretch item, each line with no origin).
 5. **Biographer: going deeper, for this job.** From the score's gaps that may
@@ -154,7 +173,12 @@ until the 14 parts.
    does not mention? If not, say no." A yes is saved in their words
    (`save_confirmed_fact`); a no closes the question. Never rephrase a question
    to get a yes, and never suggest an answer or a place where it might have
-   happened beyond the three kinds above. After the answers, offer once to
+   happened beyond the three kinds above: no example answers, no "like X or
+   Y", and no tool, product or option the student did not name themselves.
+   Before you ask, read their own list of skills (the profile's `skills`): a
+   skill on it is theirs, so ask where they used it, never whether they have
+   it. A fact they give that is a project of their own is saved as one
+   (`kind: "project"`, its own name, no job title, no employer). After the answers, offer once to
    write the résumé again with the new facts.
 6. **Close in a few lines.** What exists now (the knowledge base with its
    roles, one scored job, one résumé). What is thin: the roles that hold only
@@ -211,7 +235,7 @@ additive list, and save as the rules above say:
 
 - each role: `save_experience({ fileName, frontmatter, body, sources, expect_new: true })`,
   using the answers to the questions for titles and dates;
-- each school: `save_education({ ..., sources, expect_new: true })`;
+- each degree, licence or certification: `save_education({ ..., sources, expect_new: true })`;
 - the voice profile from the résumé: `save_voice_profile`;
 - name, contact line and headline: part 1.
 
@@ -229,7 +253,7 @@ Save: `save_profile({ name, contact_line, headline, languages, preferences: { wo
 and `save_autofill({ contact: { full_name, email, phone }, links: { linkedin, github, portfolio }, work_authorization: { ... } })`.
 
 ### 2. Education and certifications (`education`)
-Confirm each school: degree, field, dates, honors. Ask about certifications
+Confirm each degree: school, field, dates, honors. Ask about certifications
 (each one is its own education entry). Coursework only when it matters for the
 roles they want. Save with `save_education` (sources, `expect_new` for new files).
 

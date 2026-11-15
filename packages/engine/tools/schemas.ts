@@ -76,7 +76,10 @@ export const GeneratedResumeSchema = z.object({
       .array(
         z.object({
           company: z.string().min(1),
-          title: z.string().min(1),
+          // A project is headed by its own name (`company`) and may have no title; whether a row is one is the
+          // knowledge base's to say, so the save decides `kind` and checks the title (tools/ops.ts).
+          kind: z.literal("project").optional(),
+          title: z.string(),
           location: z.string().optional(),
           dates: z.string().min(4),
           summary: z.string().optional(),
@@ -89,6 +92,7 @@ export const GeneratedResumeSchema = z.object({
       .min(1),
     education: z.array(z.object({ institution: z.string(), credential: z.string(), dates: z.string().optional() })),
     skills: z.array(z.string()),
+    education_first: z.boolean().optional(),
   }),
   // One claim, one source, one provenance token. "R/C" or "05/06/07" composites
   // defeat the audit's purpose and are rejected here.

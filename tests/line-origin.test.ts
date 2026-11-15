@@ -304,8 +304,10 @@ describe("save path and read path", () => {
   let store: LocalStore;
   let saved: string;
   let old: string;
+  let kept_app: string;
   const invented = "Launched a loyalty programme for retail shoppers.";
   const gen = resume({ bullets: ["Interviewed 22 dispatchers and turned the findings into the routing roadmap.", invented] });
+  const kept = resume({ bullets: ["Interviewed 22 dispatchers and turned the findings into the routing roadmap."] });
 
   beforeAll(async () => {
     root = await mkdtemp(path.join(tmpdir(), "kairos-origin-"));
@@ -317,6 +319,7 @@ describe("save path and read path", () => {
     const mk = (company: string) => createApplication(store, { company, role: "Product Manager", snapshotMarkdown: "# Product Manager\nDispatch.", source_url_unavailable: true });
     saved = (await mk("Ridgeway")).id;
     old = (await mk("Pinecrest")).id;
+    kept_app = (await mk("Brightwater")).id;
     // A résumé saved before origins were recorded.
     await store.writeJson(["applications", old, "resume.json"], gen);
     await store.writeFile(["applications", old, "resume-source.md"], "# Noor Haddad\n");
@@ -327,16 +330,28 @@ describe("save path and read path", () => {
     else process.env.KAIROS_HOME = prevHome;
   });
 
-  it("saves a résumé with a line of no origin, returns the finding, and writes line_origins to resume.json", async () => {
+  it("saves a résumé with a line of no origin, returns it for the Writer to put right, and writes its own line_origins to resume.json", async () => {
     // A line_origins sent in by the caller is not trusted: the save computes its own.
     const res = await saveGeneratedResume(store, saved, { ...gen, line_origins: [{ kind: "bullet", role: 0, bullet: 1, text: invented, strength: "strong", overlap: 1, facts: [] }] });
     expect(res.origins.counts).toEqual({ strong: 2, partial: 0, none: 1 });
     expect(res.origins.findings.map((f) => [f.rule, f.kind, f.line])).toEqual([["origin", "none", invented]]);
+    // Since 15 November 2026 the line is also among what the Writer is to put right before the draft is shown.
+    expect(res.findings.put_right).toEqual([
+      {
+        key: "line|launched a loyalty programme for retail shoppers",
+        kind: "line_with_no_origin",
+        line: invented,
+        what: "(Harborline Freight) no verified fact of the knowledge base holds this line. Leave it out, or write it from a fact; if the person told you this, save it as a fact of theirs first (save_confirmed_fact)",
+        say: `This line rests on nothing in your knowledge base: "${invented}".`,
+      },
+    ]);
     expect(res.stretch).toEqual([]);
     const written = await store.readJson<GeneratedResume>(["applications", saved, "resume.json"]);
     expect(written!.line_origins).toEqual(res.origins.lines);
     expect(written!.line_origins!.map((l) => l.strength)).toEqual(["strong", "strong", "none"]);
     expect(written!.resume).toEqual(gen.resume);
+    // Without that line nothing is found.
+    expect((await saveGeneratedResume(store, kept_app, kept)).findings.put_right).toEqual([]);
   });
 
   it("reads back the saved origins, skips malformed ones, and computes them for a résumé saved without", () => {

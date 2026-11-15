@@ -121,10 +121,10 @@ end: '2018'
 const resume = (bullets: string[]): GeneratedResume => ({
   resume: {
     header: { name: "Alex Sample", contact: "Chicago" },
-    executive_summary: "- **Operations leader:** runs warehouses with measured outcomes.",
+    executive_summary: "- **Role:** Operations Lead at Brightpath.",
     experience: [{ company: "Brightpath", title: "Operations Lead", dates: "2014 – 2018", bullets }],
-    education: [{ institution: "Westbrook", credential: "MBA" }],
-    skills: ["Operations"],
+    education: [],
+    skills: [],
   },
   provenance_audit: [{ claim: "throughput", source_experience: "01-brightpath-ops", prov: "R" }],
 });

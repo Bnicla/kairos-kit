@@ -15,15 +15,70 @@
 
 export type ElicitResult = { action: "accept" | "decline" | "cancel"; content?: Record<string, unknown> };
 
+/** One choice the user makes in the confirmation, beside approving or declining it. */
+export interface ChoiceField {
+  type: "string";
+  title: string;
+  enum: string[];
+  default?: string;
+}
+
+/**
+ * What a client's own confirmation box does with a message, when that is less than showing it whole
+ * as written. Measured in claude.ai on 15 November 2026: the box shows the first 4,000 characters of
+ * a message and says that the rest is too long to show; it drops the line breaks; and it closes by
+ * itself, answered "cancel", 53 seconds after the call began.
+ */
+export interface ConfirmationBox {
+  /** The most characters of one message the box shows whole. A longer message is never sent: it would be shown cut. */
+  maxChars: number;
+  /** What one box should hold at most, so that it is read before the box closes; one item longer than this still gets a box. */
+  aimChars: number;
+  /** The box shows the message as one paragraph: it is written with marks between its parts, not with line breaks. */
+  oneParagraph: boolean;
+  /** The word for the user's yes in the last sentence, where clients name the button differently ("Approving"). */
+  yes?: string;
+}
+
 /** The two server calls this needs (injected for tests). */
 export interface Confirmer {
   supportsElicitation(): boolean;
-  elicit(params: { message: string; requestedSchema: { type: "object"; properties: Record<string, never>; required?: string[] } }): Promise<ElicitResult>;
+  elicit(params: { message: string; requestedSchema: { type: "object"; properties: Record<string, ChoiceField>; required?: string[] } }): Promise<ElicitResult>;
+  /** Set when the client's box shows less than the whole message, or shows it as one paragraph. */
+  box?: ConfirmationBox;
+  /** Set where the user can only approve or decline (an approval card, a yes in the chat): a confirmation offers no choice there. */
+  noChoice?: boolean;
 }
 
 /** The most a confirmation shows. A longer change is refused, never cut: the user approves only what they saw. */
 export const MAX_LINES = 150;
 export const MAX_CHARS = 12_000;
+
+/** The mark between two lines, and between two blocks, of a message a box shows as one paragraph. */
+const LINE_MARK = " | ";
+const BLOCK_MARK = " ◆ ";
+
+/**
+ * A message as the client's box will show it. With line breaks where the box keeps them. As one paragraph
+ * where it drops them: an empty line becomes the mark between blocks, a line break the mark between lines.
+ */
+export function boxText(blocks: string[][], box?: ConfirmationBox): string {
+  const kept = blocks.map((b) => b.map((l) => l.trimEnd()).filter((l) => l.trim() !== "")).filter((b) => b.length);
+  if (!box?.oneParagraph) return kept.map((b) => b.join("\n")).join("\n\n");
+  return kept.map((b) => b.map((l) => l.trim()).join(LINE_MARK)).join(BLOCK_MARK);
+}
+
+/** The most characters one message may have for this confirmer's box. */
+export function boxLimit(c: Pick<Confirmer, "box">): number {
+  return Math.min(MAX_CHARS, c.box?.maxChars ?? MAX_CHARS);
+}
+
+/** Why a message cannot be shown whole in this confirmer's box, or null when it can. */
+export function tooLongFor(c: Pick<Confirmer, "box">, message: string): string | null {
+  const max = boxLimit(c);
+  if (message.length <= max && (c.box?.oneParagraph || message.split("\n").length <= MAX_LINES + 6)) return null;
+  return `Nothing was saved: this change is too long to show whole in one confirmation (${message.length} characters; the confirmation shows ${max}), and a change is never shown cut. Save it in steps that fit: save the item first with part of its lines, then save it again with the rest added. The second confirmation shows only what is new.`;
+}
 
 /** Non-empty lines of `after` that are not in `before` (trimmed comparison). */
 export function newLines(before: string | null | undefined, after: string): string[] {
@@ -193,14 +248,20 @@ export async function askToSave(
     return "Nothing was saved. Kairos asks you to approve every change to your knowledge base in a confirmation from Claude Code, and this Claude Code did not offer one. Update Claude Code (claude update) and try again.";
   }
   const lines = (Array.isArray(preview) ? preview : preview.split("\n")).map((l) => l.trimEnd());
-  if (!fits(lines)) {
+  if (!c.box && !fits(lines)) {
     return `Nothing was saved: this change is too long to show in one confirmation (${lines.length} lines). Save it in smaller parts, for example a role's facts in two saves, so the user can read each one in full.`;
   }
   const body = lines.join("\n").trim() || "(no new text: the file is saved again unchanged)";
+  // Where the client's box shows less than the whole message, or shows it as one paragraph, the message is written for that box.
+  const message = c.box
+    ? boxText([[`Kairos: ${what}`], ...body.split(/\n{2,}/).map((b) => b.split("\n")), [`${c.box.yes ?? "Accept"} ${verb}. ${decline}`]], c.box)
+    : `Kairos: ${what}\n\n${body}\n\nAccept ${verb}. ${decline}`;
+  const long = c.box ? tooLongFor(c, message) : null;
+  if (long) return long;
   let r: ElicitResult;
   try {
     r = await c.elicit({
-      message: `Kairos: ${what}\n\n${body}\n\nAccept ${verb}. ${decline}`,
+      message,
       requestedSchema: { type: "object", properties: {} },
     });
   } catch (e) {

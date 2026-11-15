@@ -31,10 +31,24 @@ export const GENERATION_SYSTEM_PROMPT = `You are a resume generation engine for 
 - KEEP THE EVIDENCE'S AGENCY AND SCOPE. Use the ownership verb the evidence uses: "led" never becomes "chose", "decided" or "drove the decision"; "built into the instructions" never becomes "made mandatory". Add no absolutes ("every", "sole", "the first", "company-wide") the evidence does not state. A line in the evidence saying never to claim a phrasing is binding. The save step checks this against the knowledge base.
 - Bullets may run 2–3 sentences where they earn it: theme → mechanism → outcome. Keep every number and named construct exactly as provided.
 - EXECUTIVE SUMMARY = 3–4 crisp bullets (each with a short bold opener), not a prose paragraph: (1) scope/identity, (2) the differentiating combination, (3) a marquee outcome with numbers, (4) leadership + credentials. High altitude only; no task detail.
-- SUMMARY BULLETS ARE PLAIN SENTENCES (learned from a real "this sounds like gibberish" rejection): complete sentences a person would say aloud. NEVER chain colons ("who shipped X: Y, built inside Z: 100,000..."), never open with a verb-less fragment ("Reasons from model and eval evidence as daily practice"), never paraphrase the ad's phrasing back at itself. Two short sentences beat one compressed chain.
+- SUMMARY BULLETS ARE PLAIN SENTENCES (learned from a real "this sounds like gibberish" rejection): complete sentences a person would say aloud. NEVER chain colons ("who shipped X: Y, built inside Z: 100,000..."), never open with a verb-less fragment ("Reasons from model and eval evidence as daily practice"), never paraphrase the ad's phrasing back at itself. Two short sentences beat one compressed chain. A bullet keeps one subject from its first word to its last: never join a fact about the site, the team or a client to a verb of the candidate's ("…orders for two clients, which this shift picks, and manages the overtime…" is two sentences).
 - STRICT reverse-chronological experience order, always. Emphasis for the job lives in the summary and bullet selection, never in reordering roles.
 - Teaching/community affiliations (e.g. a university lectureship) belong under Education, not Professional Experience.
 - Contact line: essentials only (location · phone · email · links · citizenship); never availability tags like "open to remote".
+
+**WHAT IS THE CANDIDATE'S OWN, AND STAYS AS IT IS (the save step checks each of these and reports what differs). These rules are for what YOU write: you add nothing of your own. Where the candidate has asked for a wording themselves, it is theirs to keep.**
+- TITLES. Every title is the knowledge base's title for that entry, unchanged. Never write a title the entry does not hold.
+- PROJECTS. An entry with "kind: project" is the candidate's own project, not a job. Put it in "experience" with "company" set to the project's name exactly as the knowledge base has it, and "title" empty unless the entry states the candidate's part. Never give a project an employer or a job title. The save step puts projects in a Projects section and decides the order of the sections.
+- EDUCATION. An education row's "institution" is the school or issuer the entry itself names. Where the entry names none (a certificate with no issuer), leave "institution" empty: never write a description ("Online course") or a guess in its place.
+- SKILLS. Start from candidate.stated_skills, the candidate's own list in their own words: keep their items as written, the ones this job needs first, and leave out what it does not need. Add an item only when a verified fact names it in those words. Never write a category or a quality they did not use themselves ("Editorial leadership", "Client management"). When candidate.languages is given, end the skills with one item "Languages: …" exactly as given.
+- YEARS. Do not write a count of years ("nine years", "more than six years") unless the knowledge base states it. One you do write must be the time of exactly the roles its sentence is about, by their dates; the save step reports a longer one.
+- VERBS. Say what the candidate did with the verb their own fact uses. A member of a committee did not "keep" the site's result; an assistant who held office hours and graded did not "teach" the course; an analyst on an engagement did not "run" it.
+- THE PERSON'S OWN FIGURES. candidate.own_summary is what the person says of themselves, in their words. A count of years stated there is theirs: when you give a count of years for their career, give that one, never one you work out from dates.
+- WHAT THEY DID NOT DO. A fact that says what the person did not do ("I did not lead the deal", "a partner led the engagement") limits what you may claim. Never print it, and never turn it around.
+- AUDIENCES. Say who something was presented or reported to only as the fact says it ("to the division CFO"). Never add an audience ("to leadership") and never make the person the one who presented what the fact says someone else presented.
+- VERB FORMS. Lines open in the implied first person: "Build", "Own" for what is still done, "Built", "Rebuilt" for what is finished. Never the third person ("Builds", "Owns").
+- NO "I", "my" or "me": résumé lines are written without the pronoun ("Built…", not "where I built…"), also when the fact you draw on says "I".
+- A bullet never says a role's one-line introduction again.
 
 **HONESTY.** If the real evidence cannot support a strong resume for this role, produce the strongest honest version anyway and note the ceiling; do not pad.
 
@@ -72,6 +86,11 @@ export interface GenerationInput {
   /** The application's track (direction); positioning only, never facts. */
   track?: TrackGuidance | null;
   referenceResume?: string | null;
+  /** The person's own list of skills, in their words (profile `skills`), and their languages (profile `languages`). */
+  statedSkills?: string[];
+  languages?: string[];
+  /** What the person says of themselves, word for word (profile `summary`). */
+  ownSummary?: string;
 }
 
 export function buildGenerationUserMessage(input: GenerationInput): string {
@@ -92,6 +111,9 @@ export function buildGenerationUserMessage(input: GenerationInput): string {
       contact: input.contactLine ?? "",
       experiences: cleanedExperiences,
       education: input.educationRaw,
+      ...(input.ownSummary?.trim() ? { own_summary: input.ownSummary.trim() } : {}),
+      ...(input.statedSkills?.length ? { stated_skills: input.statedSkills } : {}),
+      ...(input.languages?.length ? { languages: input.languages } : {}),
       voice_profile: input.voiceProfile ?? "",
       reference_resume: input.referenceResume ?? "",
       summary_blocks: input.summaryBlocks ?? "",
@@ -103,8 +125,8 @@ export function buildGenerationUserMessage(input: GenerationInput): string {
       max_pages: input.targetPages ?? 2,
       length_rule:
         (input.targetPages ?? 2) === 1
-          ? "ONE full page: select only the most relevant roles and strongest bullets; condense older roles to one line or drop them. Never pad. Budget: at most ~480 words across summary + bullets + skills."
-          : "TWO full pages of real content: restore genuine achievements rather than padding; never spill to a third page. Budget: at most ~950 words across summary + bullets + skills.",
+          ? "At most ONE page: select only the most relevant roles and strongest bullets; condense older roles to one line or drop them. A page that is not full is the right result when the knowledge base holds no more: never add, repeat or stretch a line to fill it. Budget: at most ~480 words across summary + bullets + skills."
+          : "At most TWO pages of real content: restore genuine achievements rather than padding; never spill to a third page, and never add, repeat or stretch a line to fill one. Budget: at most ~950 words across summary + bullets + skills.",
     },
   };
 
@@ -126,11 +148,11 @@ const OUTPUT_CONTRACT = `{
   "resume": {
     "header": { "name": "...", "contact": "email · phone · location · links" },
     "executive_summary": "...",
-    "experience": [ { "company": "...", "title": "...", "location": "...", "dates": "Mon YYYY – Mon YYYY", "summary": "one-line role intro (real scope/mandate, optional)", "bullets": [ "..." ] } ],
-    "education": [ { "institution": "...", "credential": "...", "dates": "..." } ],
+    "experience": [ { "company": "the employer, or for a project its own name", "title": "the knowledge base's title; empty for a project with none", "location": "...", "dates": "Mon YYYY – Mon YYYY", "summary": "one-line role intro (real scope/mandate, optional)", "bullets": [ "..." ] } ],
+    "education": [ { "institution": "the school or issuer the entry names; empty when it names none", "credential": "...", "dates": "..." } ],
     "skills": [ "..." ]
   },
-  "provenance_audit": [ { "claim": "...", "source_experience": "the source experience's KB file name (e.g. 02-acme-pm.md) or its company name, exactly as in the knowledge base", "prov": "R|C|F" } ],
+  "provenance_audit": [ { "claim": "...", "source_experience": "the KB file name of the role the claim comes from (e.g. 02-acme-pm.md) or its company name, exactly as in the knowledge base; for a degree or a certificate, the file name of its education entry", "prov": "R|C|F" } ],
   "voice_notes": "...",
   "tailoring_notes": "...",
   "honest_ceiling_note": "...",

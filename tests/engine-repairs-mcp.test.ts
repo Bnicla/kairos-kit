@@ -122,16 +122,22 @@ describe("Kairos MCP server: record, register and paper", () => {
     const resume = (bullet: string) => ({
       resume: {
         header: { name: "Jordan Example", contact: "Springfield · jordan@example.com" },
-        executive_summary: "- **Software engineer:** builds internal tools for finance teams.",
+        executive_summary: "- **Internal tools:** Summer internship on the internal tools team.",
         experience: [{ company: "Ledgerly", title: "Software Engineering Intern", dates: "2025", bullets: [bullet] }],
-        education: [{ institution: "Springfield State", credential: "BSc Computer Science" }],
-        skills: ["React", "Python"],
+        // Nothing the knowledge base of this test does not hold: no education entry, no list of skills.
+        education: [],
+        skills: [],
       },
       provenance_audit: [{ claim: "reconciliation feature", source_experience: "01-ledgerly-intern", prov: "R" }],
     });
-    const refused = await client.callTool({ name: "save_resume", arguments: { appId, resume: resume("Cut checkout errors by 60%.") } });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toMatch(/metrics register does not allow: "60%"/);
+    // A number the register withholds no longer stops the tool call (the owner's decision of 15 November 2026): the
+    // résumé is saved, and the number comes back for the Writer to take out, or to tell the user, in plain words.
+    const withheld = await client.callTool({ name: "save_resume", arguments: { appId, resume: resume("Cut checkout errors by 60%.") } });
+    expect(withheld.isError, text(withheld)).toBeFalsy();
+    const item = JSON.parse(text(withheld)).put_right_before_showing.items.find((i: { kind: string }) => i.kind === "register_withholds");
+    expect(item.key).toBe("register|60%");
+    expect(item.what).toMatch(/^"60%" matches the metrics-register entry ".*" \((?:OPEN|PARTIAL|RETIRED), under ".*"\)\. Only DEFENDED and SCOPE numbers go into a document/);
+    expect(item.say).toMatch(/^The number "60%" is on this résumé\. Your numbers register has it as (?:OPEN|PARTIAL|RETIRED) \(".*"\), which is not a status you put on a document\.$/);
 
     const saved = await client.callTool({ name: "save_resume", arguments: { appId, resume: resume("Shipped a reconciliation feature used by 40+ internal users.") } });
     expect(saved.isError, text(saved)).toBeFalsy();

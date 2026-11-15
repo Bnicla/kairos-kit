@@ -24,6 +24,7 @@ import {
 } from "@kairos/engine/prompts/cover-letter";
 import { checkProse, hardProseViolations } from "@kairos/engine/tools/prose-checks";
 import { loadResumePaper, readProfileSettings } from "@kairos/engine/settings";
+import { resumeLengthPolicy } from "@kairos/engine/length-policy";
 import { markdownLetterToDocx } from "@kairos/engine/docx-render";
 import type { ScoreReport } from "@kairos/engine/types";
 
@@ -129,6 +130,11 @@ export async function generateResumeHeadless(appId: string): Promise<{ ok: true 
     recruiterFeedback,
     candidateName: typeof profile.name === "string" ? profile.name : undefined,
     contactLine: typeof profile.contact_line === "string" ? profile.contact_line : undefined,
+    // The person's own lists (profile `skills`, `languages`), as the tool server gives them to the Writer.
+    statedSkills: Array.isArray(profile.skills) ? profile.skills.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [],
+    languages: Array.isArray(profile.languages) ? profile.languages.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [],
+    ownSummary: typeof profile.summary === "string" ? profile.summary : undefined,
+    targetPages: resumeLengthPolicy(experiences, { override: profile.target_pages === 1 || profile.target_pages === 2 ? profile.target_pages : undefined }).targetPages,
   });
   const headline = typeof profile.headline === "string" ? profile.headline : undefined;
 

@@ -11,7 +11,7 @@ setting the engine reads has no section and no stated default.
 | 1 | `identity` | Name, contact line, headline, links, languages, work authorization. | `save_profile`, `save_autofill` |
 | 2 | `education` | Degrees, schools, dates, certifications, honors; coursework only if it matters for the target roles. | `save_education` |
 | 3 | `experience` | Each role, internship or project: dates, what the student personally built, results with numbers, tools. | `save_experience`, `save_confirmed_fact`, `save_metric`, `get_enrichment_questions` |
-| 4 | `skills` | Confirm the skills found per role and add missing ones, each tied to a role where it was used. | `save_experience`, `save_confirmed_fact` |
+| 4 | `skills` | Confirm the skills found per role and add missing ones, each tied to a role where it was used. Confirm the person's own list of skills (as their résumé gives it) and add what is missing, in their words. | `save_experience`, `save_confirmed_fact` |
 | 5 | `goals` | The work they want day to day, then target titles; propose nearby titles; industries and topics of interest. | `save_profile`, `save_search_profile` |
 | 6 | `level` | The level they target, the ceiling they will not go above, and the shape of role (individual work, team lead, mix). | `save_profile`, `save_search_profile` |
 | 7 | `dealbreakers` | Industries, companies and role types they will not consider. | `save_profile`, `save_search_profile` |
@@ -30,6 +30,9 @@ setting the engine reads has no section and no stated default.
 | `profile.name` | profile.md | 1. identity | Taken from the résumé. | Résumé header, file names, form autofill. |
 | `profile.contact_line` | profile.md | 1. identity | Taken from the résumé. | Résumé contact line; health check. |
 | `profile.headline` | profile.md | 1. identity | No tagline. | Tagline under the name on the résumé. |
+| `profile.resume_choices` | profile.md | 1. identity | None: every difference is raised. | Differences from the knowledge base that the user chose to keep on every résumé (a role written to Present, a skills line of their own): the résumé save does not raise them again. Each entry holds the user's own words and the day; remove one to have it raised again. |
+| `profile.summary` | profile.md | 1. identity | None: the summary rests on the roles only. | The person's own summary of themselves, word for word. A count of years they state there is the figure a résumé keeps; a summary sentence may rest on it. |
+| `profile.skills` | profile.md | 4. skills | No list: scoring and the Skills section use only the skills the roles show. | The person's own list of skills, in their words. Given to scoring as stated skills, and a résumé's Skills section starts from it. |
 | `profile.languages` | profile.md | 1. identity | Not stated: scoring treats language requirements as unconfirmed. | Given to scoring so language requirements are not marked unconfirmed. |
 | `profile.preferences` | profile.md | not asked | Empty. | Container for the preference fields below. |
 | `profile.preferences.work_authorization` | profile.md | 1. identity | Not stated: scoring flags authorization requirements as unconfirmed. | Given to scoring (sponsorship and citizenship requirements). |

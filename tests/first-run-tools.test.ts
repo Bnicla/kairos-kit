@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,8 +12,9 @@ import { afterStop } from "@/mcp/after-stop";
 
 /**
  * The real MCP server over stdio against an empty temporary data folder
- * (invented data): the first import is approved once, in one confirmation that
- * shows every item in full, and only while the knowledge base is empty; the
+ * (invented data): the first import is approved in Kairos's own confirmation,
+ * in plain words, every line shown when there is no document to compare with,
+ * in parts when it is long, and only while the knowledge base is empty; the
  * tools the first run used to call one after the other answer in one call.
  */
 describe("Kairos MCP server: the first import and the merged calls", () => {
@@ -79,47 +80,79 @@ describe("Kairos MCP server: the first import and the merged calls", () => {
     expect(files("knowledge-base", "experiences")).toEqual([]);
   }, 60_000);
 
-  it("a list too long to show in full is not cut and not saved: the items then go one by one", async () => {
-    const long = Array.from({ length: 12 }, (_, i) => role(i + 1, `Company${i + 1}`, Array.from({ length: 14 }, (_, j) => `- Result number ${j + 1} at company ${i + 1}, told in a full sentence. [R]`)));
-    const r = await call("save_first_import", { ...first, experiences: long.map((e, i) => ({ ...e, fileName: `${String(i + 1).padStart(2, "0")}-company.md` })) });
+  it("a list longer than one confirmation shows is asked in parts, no item cut; a declined part saves nothing", async () => {
+    answer = "decline";
+    const long = Array.from({ length: 12 }, (_, i) => ({
+      ...role(i + 1, `Company${i + 1}`, Array.from({ length: 14 }, (_, j) => `- Result number ${j + 1} at company ${i + 1}, told in a full sentence. [R]`)),
+      fileName: `${String(i + 1).padStart(2, "0")}-company.md`,
+    }));
+    const r = await call("save_first_import", { ...first, experiences: long });
     expect(r.isError).toBe(true);
-    expect(text(r)).toMatch(/too long to show in one confirmation/);
-    expect(text(r)).toMatch(/call save_profile, then save_experience for each role and save_education for each school/);
-    expect(shown).toEqual([]);
+    // One confirmation was shown, the first of several, and the call stopped at the answer.
+    expect(shown).toHaveLength(1);
+    const box = shown[0];
+    const parts = Number(/^Kairos: your first import, part 1 of (\d+)\. Nothing of this part is saved yet\./.exec(box)?.[1]);
+    expect(parts).toBeGreaterThan(1);
+    // Under what one confirmation shows here, and every job in it has its 15 lines whole.
+    expect(box.length).toBeLessThanOrEqual(12_000);
+    const jobs = [...box.matchAll(/^Job (\d+) of 12: /gm)].map((m) => Number(m[1]));
+    expect(jobs.length).toBeGreaterThan(1);
+    expect(jobs.length).toBeLessThan(12);
+    expect(jobs).toEqual(jobs.map((_, i) => i + 1));
+    for (const n of jobs) for (let j = 1; j <= 14; j++) expect(box, `job ${n}, line ${j}`).toContain(`Result number ${j} at company ${n}, told in a full sentence.`);
+    expect(box).not.toContain(`at company ${jobs.length + 1},`);
+    expect(box).toContain(`Accept saves part 1 only. Decline saves nothing of it. ${parts - 1} more part${parts === 2 ? " follows" : "s follow"}.`);
+    expect(text(r)).toMatch(new RegExp(`^Part 1 of ${parts} was not saved: the user declined it\\. Not saved: `));
+    expect(text(r)).toContain("call save_first_import again with the same items");
     expect(files("knowledge-base", "experiences")).toEqual([]);
+    expect(existsSync(join(home, "profile.md")) ? readFileSync(join(home, "profile.md"), "utf8") : "").not.toContain("Jordan Example");
   }, 60_000);
 
   it("declined: one confirmation was shown and nothing is saved, not even the profile", async () => {
     answer = "decline";
+    shown.length = 0;
     const r = await call("save_first_import", first);
     expect(r.isError).toBe(true);
-    expect(text(r)).toMatch(/the user did not approve/);
+    expect(text(r)).toMatch(/^Nothing was saved: the user declined it\./);
     expect(shown).toHaveLength(1);
     expect(files("knowledge-base", "experiences")).toEqual([]);
     expect(files("knowledge-base", "education")).toEqual([]);
     expect(existsSync(join(home, "profile.md")) ? readFileSync(join(home, "profile.md"), "utf8") : "").not.toContain("Jordan Example");
   }, 60_000);
 
-  it("approved once: the one confirmation shows every item in full, and everything in it is saved", async () => {
+  it("approved once: with no document to compare with, the one confirmation shows every line in plain words, and everything in it is saved", async () => {
     answer = "accept";
     shown.length = 0;
     const r = await call("save_first_import", first);
     expect(r.isError, text(r)).toBeFalsy();
-    // One confirmation, for the whole list.
+    // One confirmation, for the whole list, with line breaks (this client keeps them).
     expect(shown).toHaveLength(1);
     const box = shown[0];
-    expect(box).toMatch(/^Kairos: save your first import: your profile, 2 roles, 1 school\n/);
-    expect(box).toContain("Accept saves all of it to your knowledge base. Decline if any of it is wrong: nothing is saved.");
-    // Every item in full: the profile's three fields, each role's fields and every line of its text, the school.
-    for (const line of ["+ name: Jordan Example", "+ contact_line: Columbus, OH · jordan@example.com", "+ headline: Software Engineer, Internal Tools"]) expect(box).toContain(line);
-    expect(box).toContain("Role 1 of 2: Software Engineering Intern at Ledgerly (01-ledgerly.md)");
-    expect(box).toContain("Role 2 of 2: Software Engineering Intern at Harborline (02-harborline.md)");
-    expect(box).toContain("School 1 of 1: state-university.md");
-    for (const item of [ledgerly, harborline, school]) for (const line of item.body.split("\n").filter(Boolean)) expect(box, line).toContain(`+ ${line}`);
-    for (const field of ["+ company: Ledgerly", "+ start: 2025-06", "+ institution: State University", "+ credential: B.S. Computer Science"]) expect(box).toContain(field);
+    expect(box).toBe(
+      [
+        "Kairos: your first import. Nothing is saved yet.",
+        "",
+        "You: Jordan Example; Columbus, OH · jordan@example.com; headline: Software Engineer, Internal Tools.",
+        "",
+        "Job 1 of 2: Software Engineering Intern at Ledgerly, June 2025 to August 2025.",
+        "Its 3 lines: (1) Internship on the internal tools team at Ledgerly. (2) Built a dashboard the operations team uses daily. (3) Wrote tests for the data pipeline.",
+        "Kairos adds, to match job ads: skills: Python.",
+        "",
+        "Job 2 of 2: Software Engineering Intern at Harborline, June 2025 to August 2025.",
+        "Its 3 lines: (1) Internship on the internal tools team at Harborline. (2) Shipped a reconciliation feature used by 40 internal users. (3) A line with no tag.",
+        "Kairos adds, to match job ads: skills: Python.",
+        "",
+        "Education and credentials, 1 of 1: B.S. Computer Science (State University, 2027).",
+        "Its line: (1) Expected May 2027.",
+        "",
+        "Accept saves all of it. Decline saves nothing.",
+      ].join("\n"),
+    );
 
     const out = JSON.parse(text(r));
-    expect(out).toMatchObject({ ok: true, roles: 2, schools: 1, index_refreshed: true });
+    expect(out).toMatchObject({ ok: true, roles: 2, education: 1, approved: "all at once", confirmations: 1, index_refreshed: true });
+    // No document's text was read through the tools here, so nothing is said about where the lines stand.
+    expect(out.lines).toBeUndefined();
     expect(out.saved).toEqual(["profile.md", "knowledge-base/experiences/01-ledgerly.md", "knowledge-base/experiences/02-harborline.md", "knowledge-base/education/state-university.md"]);
     // A line with no tag is saved and named, as a single save names it.
     expect(out.untagged_facts).toEqual([{ file: "02-harborline.md", facts: [expect.objectContaining({ text: "- A line with no tag." })] }]);
@@ -131,12 +164,21 @@ describe("Kairos MCP server: the first import and the merged calls", () => {
     expect(readFileSync(join(home, "knowledge-base", "_index.md"), "utf8")).toContain("02-harborline");
   }, 60_000);
 
-  it("only the first import: once the knowledge base holds a role, the same call is refused with no confirmation, and a save asks by itself", async () => {
+  it("only the first import: what it saved is not asked again, a changed or other file refuses the call with no confirmation, and a save asks by itself", async () => {
     shown.length = 0;
-    const again = await call("save_first_import", first);
-    expect(again.isError).toBe(true);
-    expect(text(again)).toMatch(/already holds 3 role or school file\(s\): this is not a first import/);
+    // The same items again: all of it is in the knowledge base as approved, so nothing is asked and nothing is written.
+    const same = await call("save_first_import", first);
+    expect(same.isError, text(same)).toBeFalsy();
+    expect(JSON.parse(text(same))).toMatchObject({ ok: true, saved: [], approved: "nothing left to approve", confirmations: 0 });
+    // One saved role with other content, or a knowledge base that holds a file this call does not name: not a first import.
+    const changed = await call("save_first_import", { ...first, experiences: [ledgerly, { ...harborline, body: `${harborline.body}\n- A line added after the approval. [R]` }] });
+    expect(changed.isError).toBe(true);
+    expect(text(changed)).toMatch(/already holds 1 role or education file\(s\) that are not part of this import: this is not a first import/);
+    const others = await call("save_first_import", { ...first, experiences: [role(7, "Quillstack", ["- A role of another import. [R]"])], education: [] });
+    expect(others.isError).toBe(true);
+    expect(text(others)).toMatch(/already holds 3 role or education file\(s\) that are not part of this import/);
     expect(shown).toEqual([]);
+    expect(files("knowledge-base", "experiences")).toEqual(["01-ledgerly.md", "02-harborline.md"]);
 
     // A later save is shown and approved by itself, and refreshes the map without a rebuild_index call.
     const third = role(3, "Quillstack", ["- Wrote the SQL behind the weekly report. [C]"]);
@@ -245,4 +287,179 @@ describe("Kairos MCP server: the first import and the merged calls", () => {
     // No tool is left without a sentence.
     expect(afterStop("a_tool_added_later")).toMatch(/may have been saved/);
   });
+});
+
+/**
+ * The same server, a document read through its own tool first: the first import is then a summary the
+ * user reads at a glance, with the choice to go one by one (invented data).
+ */
+describe("Kairos MCP server: the first import after a document was read", () => {
+  const home = mkdtempSync(join(tmpdir(), "kairos-first-run-doc-"));
+  const folder = mkdtempSync(join(tmpdir(), "kairos-first-run-files-"));
+  let client: Client;
+  const asked: { message: string; fields: string[] }[] = [];
+  const answers: { action: "accept" | "decline" | "cancel"; content?: Record<string, string> }[] = [];
+  const text = (r: unknown) => ((r as { content: { text: string }[] }).content[0]?.text ?? "");
+  const resume = [
+    "Jordan Example",
+    "Columbus, OH · jordan@example.com",
+    "Software Engineering Intern, Ledgerly, June 2025 to August 2025",
+    "Built a dashboard the operations team uses daily.",
+    "Wrote tests for the data pipeline in Python.",
+    "B.S. Computer Science, State University, expected 2027",
+    "Summary",
+    "Computer science student with two years of Python.",
+    "Skills",
+    "Python, SQL, Git",
+    "Languages",
+    "English (native)",
+  ].join("\n");
+  const list = {
+    // The résumé's own list of skills and its languages, in its words; "Kafka" is not on it.
+    profile: { name: "Jordan Example", contact_line: "Columbus, OH · jordan@example.com", summary: "Computer science student with two years of Python.", skills: ["Python", "SQL", "Git", "Kafka"], languages: ["English (native)"] },
+    experiences: [
+      {
+        fileName: "01-ledgerly.md",
+        frontmatter: { id: "ledgerly", company: "Ledgerly", title: "Software Engineering Intern", start: "2025-06", end: "2025-08", skills: [{ name: "Python", prov: "R" }, { name: "Kubernetes", prov: "R" }] },
+        body: "## Achievements\n- Built a dashboard the operations team uses daily. [R]\n- Wrote tests for the data pipeline in Python. [R]\n- Owned the release process. [R]",
+      },
+    ],
+    education: [{ fileName: "state-university.md", frontmatter: { institution: "State University", credential: "B.S. Computer Science", dates: "expected 2027" }, body: "- B.S. Computer Science, State University, expected 2027 [R]" }],
+    sources: ["resume.txt"],
+  };
+
+  beforeAll(async () => {
+    writeFileSync(join(folder, "resume.txt"), resume);
+    client = new Client({ name: "test", version: "0" }, { capabilities: { elicitation: {} } });
+    client.setRequestHandler(ElicitRequestSchema, async (request) => {
+      asked.push({ message: request.params.message, fields: Object.keys((request.params as { requestedSchema?: { properties?: object } }).requestedSchema?.properties ?? {}) });
+      return answers.shift() ?? { action: "decline" };
+    });
+    await client.connect(new StdioClientTransport({ command: "npx", args: ["tsx", "apps/local/mcp/server.ts"], env: { ...process.env, KAIROS_HOME: home } as Record<string, string>, stderr: "ignore" }));
+  }, 60_000);
+
+  afterAll(async () => {
+    await client?.close();
+    rmSync(home, { recursive: true, force: true });
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("the summary counts the lines that are the document's own, shows the line and the skill that are not, and offers the choice; one by one then shows every line", async () => {
+    answers.push({ action: "accept" });
+    const read = await client.callTool({ name: "prepare_extraction", arguments: { path: join(folder, "resume.txt") } });
+    expect(read.isError, text(read)).toBeFalsy();
+    answers.push({ action: "accept", content: { how: "Show me each item, one by one" } }, { action: "accept" }, { action: "accept" });
+    const saved = await client.callTool({ name: "save_first_import", arguments: list });
+    expect(saved.isError, text(saved)).toBeFalsy();
+    const [, summary, job, entry] = asked;
+    expect(asked).toHaveLength(4);
+    expect(summary.fields).toEqual(["how"]);
+    expect(summary.message).toBe(
+      [
+        "Kairos read your document, resume.txt. Nothing is saved yet.",
+        "",
+        "It will save:",
+        'You: Jordan Example; Columbus, OH · jordan@example.com; what you say of yourself: "Computer science student with two years of Python."; your skills, as you list them: Python, SQL, Git, Kafka; languages: English (native).',
+        "1 job: Software Engineering Intern at Ledgerly, June 2025 to August 2025 (3 lines).",
+        "1 education or credential entry: B.S. Computer Science (State University, expected 2027).",
+        "",
+        "3 of the 4 lines are word for word from your document. 1 is not: Claude worded it. Check it:",
+        '(1) "Owned the release process." (job 1: Software Engineering Intern at Ledgerly)',
+        'Also not in your document: the skill "Kafka" (your profile).',
+        "",
+        "Kairos also adds, to match job ads, the skills, search words and sizes it reads in those lines. 1 is not a word from your document: Kubernetes.",
+        "",
+        "Choose below: save all of it, or see each item one by one. Decline saves nothing. You can read and correct every line afterwards: ask to see your knowledge base.",
+      ].join("\n"),
+    );
+    expect(job.fields).toEqual([]);
+    expect(job.message).toContain("Kairos: your first import, part 1 of 2. Nothing of this part is saved yet.");
+    expect(job.message).toContain("Its 3 lines: (1) Built a dashboard the operations team uses daily. (2) Wrote tests for the data pipeline in Python. (3) Owned the release process. [Claude's wording, not in your document]");
+    expect(job.message).toContain("Kairos adds, to match job ads: skills: Python, Kubernetes.");
+    expect(entry.message).toContain("part 2 of 2");
+    const out = JSON.parse(text(saved));
+    expect(out).toMatchObject({ ok: true, approved: "one by one", confirmations: 3, lines: { total: 4, word_for_word: 3, claude_wording: ["Owned the release process. [R]"] } });
+    expect(readdirSync(join(home, "knowledge-base", "experiences")).filter((f) => !f.startsWith("_"))).toEqual(["01-ledgerly.md"]);
+    // The person's own list and their languages are in the profile, as approved, for the Assessor and the Writer.
+    const profile = readFileSync(join(home, "profile.md"), "utf8");
+    expect(profile).toMatch(/skills:\n\s+- Python\n\s+- SQL\n\s+- Git\n\s+- Kafka\n/);
+    expect(profile).toMatch(/languages:\n\s+- English \(native\)\n/);
+    expect(profile).toContain("summary: Computer science student with two years of Python.");
+  }, 60_000);
+
+  it("the Assessor and the Writer are given the list; a question that suggests its answer comes back to be reworded; a résumé in the wrong shape says that nothing was saved", async () => {
+    const appId = (await createApplication(new LocalStore(home), { company: "Brightwater Systems", role: "Junior Software Engineer", snapshotMarkdown: "# Junior Software Engineer\nPython, SQL and Git.", source_url_unavailable: true })).id;
+    const scoring = JSON.parse(text(await client.callTool({ name: "get_scoring_evidence", arguments: { appId } })));
+    expect(scoring.user_message).toContain('"skills": [\n        "Python",\n        "SQL",\n        "Git",\n        "Kafka"\n      ]');
+    expect(scoring.system_prompt).toContain("An item on either list is stated by the candidate: never report it as a gap");
+
+    // A question that suggests its answer does not stop the score: it is saved, and the question comes back to be reworded before it is asked.
+    const report = {
+      parse_safety: { verdict: "PASS", checks: [], ats_specific_note: "Plain text." },
+      match: { detected_ats: "unknown", dimensions: [{ name: "hard_skills", score: 60, justification: "Python is on the résumé." }], overall_band: "COMPETITIVE", confidence: "medium", pool_caveat: "The ranking depends on who else applies, which cannot be known." },
+      authenticity: { score: 80, flags: [], strengths: [] },
+      gaps: [{ requirement: "Git", severity: "IMPORTANT", type: "possibly_uncaptured", clarifying_question: "Did you use Git (commits, branches, pull requests) in the internship?" }],
+      reachable: { band_if_tailored: "COMPETITIVE", from_reframing: [], needs_user_confirmation: [], honest_ceiling_note: "None." },
+      recommendation: "APPLY_AFTER_TAILORING",
+    };
+    const leading = await client.callTool({ name: "save_score", arguments: { appId, report } });
+    expect(leading.isError, text(leading)).toBeFalsy();
+    expect(JSON.parse(text(leading)).questions_to_reword_before_asking.items).toEqual([{ question: "Did you use Git (commits, branches, pull requests) in the internship?", suggests: "(commits, branches, pull requests)" }]);
+
+    // The inner object where the whole one is expected (the run's first failed save): refused with the shape, and "nothing was saved".
+    const inner = await client.callTool({ name: "save_resume", arguments: { appId, resume: { header: { name: "Jordan Example", contact: "x" }, executive_summary: "x", experience: [], education: [], skills: [] } } });
+    expect(inner.isError).toBe(true);
+    expect(text(inner)).toContain('The whole object is expected: { "resume": {');
+    expect(text(inner)).toMatch(/Nothing was saved\.$/);
+    expect(text(inner)).not.toContain("This stopped before it finished");
+    // (The Writer's evidence needs a score first; that it carries the list is tested in tests/trial-fixes.test.ts.)
+  }, 60_000);
+
+  it("a résumé that differs from the knowledge base is saved, with what to put right; a choice the user makes once is remembered in the profile, shown to them, and not raised again", async () => {
+    const appId = (await createApplication(new LocalStore(home), { company: "Northwind", role: "Software Engineer", snapshotMarkdown: "# Software Engineer\nPython.", source_url_unavailable: true })).id;
+    const resume = {
+      resume: {
+        header: { name: "Jordan Example", contact: "Columbus, OH · jordan@example.com" },
+        executive_summary: "- **Intern:** Software Engineering Intern at Ledgerly.",
+        // The role ended in August 2025 in the knowledge base; the user wants it written as current.
+        experience: [{ company: "Ledgerly", title: "Software Engineering Intern", dates: "Jun 2025 - Present", bullets: ["Built a dashboard the operations team uses daily."] }],
+        education: [],
+        skills: ["Python"],
+      },
+      provenance_audit: [{ claim: "Built a dashboard", source_experience: "01-ledgerly.md", prov: "R" }],
+    };
+    const first = await client.callTool({ name: "save_resume", arguments: { appId, resume } });
+    expect(first.isError, text(first)).toBeFalsy();
+    const out = JSON.parse(text(first));
+    expect(out.put_right_before_showing.items).toEqual([
+      {
+        key: "dates|ledgerly|2025 present",
+        kind: "dates_differ",
+        what: '"Jun 2025 - Present" under "Ledgerly": the knowledge base holds 2025-06 to 2025-08 for that entry. Write its dates as they are',
+        // What the user reads: what is on the résumé and what their knowledge base holds, and nothing more.
+        say: 'The dates "Jun 2025 - Present" are on this résumé. Your knowledge base has other dates for that entry.',
+      },
+    ]);
+    expect(out.put_right_before_showing.how).toContain("If the user asked for it themselves, change nothing: it is theirs");
+    expect(out.tell_the_user.how).toContain('in plain words, with no judgement and no "you must"');
+    expect(out.kept_by_the_users_choice).toBeUndefined();
+
+    // The user says: keep it, on every résumé. Their choice goes into the profile, with their approval and in their words.
+    asked.length = 0;
+    answers.push({ action: "accept" });
+    const kept = await client.callTool({ name: "save_profile", arguments: { resume_choices: [{ key: out.put_right_before_showing.items[0].key, says: "My Ledgerly internship stays written to Present" }] } });
+    expect(kept.isError, text(kept)).toBeFalsy();
+    expect(asked[0]!.message).toContain("+ kept on every résumé, and not raised again: My Ledgerly internship stays written to Present");
+    expect(readFileSync(join(home, "profile.md"), "utf8")).toMatch(/resume_choices:\n\s+- key: dates\|ledgerly\|2025 present\n\s+says: My Ledgerly internship stays written to Present\n\s+since: '?\d{4}-\d{2}-\d{2}/);
+    const second = JSON.parse(text(await client.callTool({ name: "save_resume", arguments: { appId, resume } })));
+    expect(second.put_right_before_showing.items).toEqual([]);
+    expect(second.kept_by_the_users_choice.count).toBe(1);
+
+    // They change their mind: the choice is taken off, shown to them, and the difference is raised again.
+    answers.push({ action: "accept" });
+    await client.callTool({ name: "save_profile", arguments: { resume_choices: [{ key: "dates|ledgerly|2025 present", remove: true }] } });
+    expect(asked[asked.length - 1]!.message).toContain("- no longer kept on every résumé: My Ledgerly internship stays written to Present");
+    const third = JSON.parse(text(await client.callTool({ name: "save_resume", arguments: { appId, resume } })));
+    expect(third.put_right_before_showing.items).toHaveLength(1);
+  }, 60_000);
 });

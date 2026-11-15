@@ -104,6 +104,9 @@ export interface OriginFinding {
   company: string;
   line: string;
   detail: string;
+  /** kind "audit": which entry of provenance_audit names the wrong source, and the entries the facts were found in. */
+  audit_index?: number;
+  found?: string[];
 }
 
 export interface OriginCounts {
@@ -167,7 +170,7 @@ function educationFacts(raws: string[], guard: RegExp): Fact[] {
 
 const RANK: Record<OriginStrength, number> = { none: 0, partial: 1, strong: 2 };
 
-const idOf = (e: Experience) => String(e.frontmatter.id ?? "").trim() || e.fileName.replace(/\.md$/, "");
+export const idOf = (e: Experience) => String(e.frontmatter.id ?? "").trim() || e.fileName.replace(/\.md$/, "");
 
 /** The verified facts of some entries, list marker and line wraps removed, correction lines left out. */
 function factsOf(exps: Experience[], guard: RegExp): Fact[] {
@@ -270,9 +273,18 @@ export function computeLineOrigins(gen: GeneratedResume, experiences: Experience
   const byCompany = byCompanyOf(experiences);
   const all = factsOf(experiences, guard);
   const education = educationFacts(opts.education ?? [], guard);
-  const line = (position: Pick<LineOrigin, "kind" | "role" | "bullet" | "sentence">, text: string, facts: Fact[]): LineOrigin => {
+  // What an entry is, in the person's own fields: its title, its employer, its place. A summary sentence that says who
+  // the person is ("Backend engineer in payments") or a role's introduction rests on these as much as on a line.
+  const headerOf = (e: Experience) => asFact(idOf(e), [e.frontmatter.title, e.frontmatter.company, e.frontmatter.location].filter((x) => typeof x === "string" && x.trim()).join(", "));
+  const headers = experiences.map(headerOf);
+  const line = (position: Pick<LineOrigin, "kind" | "role" | "bullet" | "sentence">, text: string, facts: Fact[], own: Fact[] = []): LineOrigin => {
     const composed = position.kind === "summary";
     let t = trace(text, facts, { composed });
+    const named = composed ? headers : position.kind === "role_intro" ? own : [];
+    if (named.length && t.strength !== "strong") {
+      const withHeaders = trace(text, [...facts, ...named], { composed });
+      if (RANK[withHeaders.strength] > RANK[t.strength]) t = withHeaders;
+    }
     // A summary sentence may state the degree: the education entries are consulted, and kept only when the origin is stronger with them.
     if (composed && education.length && t.strength !== "strong") {
       const withEducation = trace(text, [...facts, ...education], { composed });
@@ -289,7 +301,7 @@ export function computeLineOrigins(gen: GeneratedResume, experiences: Experience
   const out: LineOrigin[] = summarySentences(gen.resume.executive_summary ?? "").map((s, i) => line({ kind: "summary", sentence: i }, s, all));
   (gen.resume.experience ?? []).forEach((exp, role) => {
     const own = factsOf(byCompany.get(String(exp.company ?? "").toLowerCase().trim()) ?? [], guard);
-    if (exp.summary?.trim()) out.push(line({ kind: "role_intro", role }, exp.summary, own));
+    if (exp.summary?.trim()) out.push(line({ kind: "role_intro", role }, exp.summary, own, (byCompany.get(String(exp.company ?? "").toLowerCase().trim()) ?? []).map(headerOf)));
     (exp.bullets ?? []).forEach((b, bullet) => out.push(line({ kind: "bullet", role, bullet }, b, own)));
   });
   return out;
@@ -335,7 +347,7 @@ export function checkLineOrigins(gen: GeneratedResume, experiences: Experience[]
 
   const asFacts: Fact[] = lines.map((l, i) => asFact(String(i), l.text));
   const seen = new Set<string>();
-  for (const entry of gen.provenance_audit ?? []) {
+  for (const [auditIndex, entry] of (gen.provenance_audit ?? []).entries()) {
     const named = auditSourceExperiences(entry.source_experience, experiences);
     if (!named?.length) continue;
     const about = trace(entry.claim, asFacts, { maxFacts: 1 });
@@ -348,10 +360,13 @@ export function checkLineOrigins(gen: GeneratedResume, experiences: Experience[]
     const key = `${lines.indexOf(target)}|${[...namedIds].join(",")}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const found = [...new Set(target.facts.map((f) => f.experience_id))].join(", ");
+    const foundIn = [...new Set(target.facts.map((f) => f.experience_id))];
+    const found = foundIn.join(", ");
     findings.push({
       rule: "origin",
       kind: "audit",
+      audit_index: auditIndex,
+      found: foundIn,
       company: companyOf(target),
       line: target.text,
       detail: `the provenance audit names "${clip(entry.source_experience, 60)}" for this line; that entry holds no fact for it, and the facts found are in ${found}`,

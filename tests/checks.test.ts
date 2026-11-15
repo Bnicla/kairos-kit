@@ -127,7 +127,7 @@ describe("checkResumeGrounding — source-bound metrics (REQ-3)", () => {
       executive_summary: "Product leader.",
       experience: [
         { company: "Acme", title: "PM", dates: "2020 – 2022", bullets: acmeBullets },
-        { company: "Globex", title: "PM", dates: "2018 – 2020", bullets: globexBullets },
+        { company: "Globex", title: "PM", dates: "2020 – 2022", bullets: globexBullets },
       ],
       education: [],
       skills: [],
