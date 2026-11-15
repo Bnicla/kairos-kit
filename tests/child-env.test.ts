@@ -52,3 +52,24 @@ describe("the environment of a helper program", () => {
     expect(without).toEqual([]);
   });
 });
+
+describe("LibreOffice in the tests", () => {
+  it("is treated as absent unless KAIROS_LO_TESTS=1 asks for it", async () => {
+    const { libreOfficeOff, renderDocxToPdf } = await import("@/lib/pdf-render");
+    const { probeResumeLayout } = await import("@/lib/layout-probe");
+    if (process.env.KAIROS_LO_TESTS === "1") {
+      expect(libreOfficeOff()).toBe(false);
+      return;
+    }
+    expect(libreOfficeOff()).toBe(true);
+    // Absent means no program is started: both answer null at once, for any file.
+    expect(await renderDocxToPdf("/tmp/kairos-no-such-file.docx")).toBeNull();
+    expect(await probeResumeLayout("/tmp/kairos-no-such-file.docx")).toBeNull();
+  });
+
+  it("gives each process its own profile folder", async () => {
+    const { libreOfficeProfile } = await import("@/lib/pdf-render");
+    expect(libreOfficeProfile("pdf")).toBe(`file:///tmp/lo-kairos-pdf-${process.pid}`);
+    expect(libreOfficeProfile("probe")).not.toBe(libreOfficeProfile("pdf"));
+  });
+});

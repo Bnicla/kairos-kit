@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AtsExpect } from "@kairos/engine/ats-text";
 import { childEnv } from "./child-env";
-import { checkPdfAts, oneAtATime, pdftotextPath, sofficePath, type AtsCheck } from "./pdf-render";
+import { checkPdfAts, libreOfficeOff, libreOfficeProfile, oneAtATime, pdftotextPath, runLibreOffice, sofficePath, type AtsCheck } from "./pdf-render";
 import { existsSync } from "node:fs";
 
 /**
@@ -29,13 +29,8 @@ const SOFFICE = sofficePath();
 // poppler's pdfinfo: PDFINFO_PATH, then Homebrew's spots, then the system's (Linux).
 const PDFINFO =
   [process.env.PDFINFO_PATH, "/opt/homebrew/bin/pdfinfo", "/usr/local/bin/pdfinfo", "/usr/bin/pdfinfo"].find((p): p is string => !!p && existsSync(p)) ?? "/opt/homebrew/bin/pdfinfo";
-// Isolated LibreOffice profile so the probe never pops a visible window and
-// never collides with the user's own LibreOffice session.
-const LO_PROFILE = "file:///tmp/lo-kairos-probe";
-// svp = true headless backend; skips the macOS window server so no Dock/tray
-// icon flashes on each render (plain --headless still registers a GUI app).
-// A short environment of its own (child-env.ts): LibreOffice gets none of the server's settings.
-const HEADLESS_ENV = childEnv({ SAL_USE_VCLPLUGIN: "svp" });
+// Its own LibreOffice profile folder, apart from the PDF render's (pdf-render.ts, libreOfficeProfile).
+const LO_PROFILE = libreOfficeProfile("probe");
 
 export interface LayoutProbe {
   pages: number;
@@ -55,6 +50,7 @@ export interface LayoutProbe {
 }
 
 async function toolsPresent(): Promise<boolean> {
+  if (libreOfficeOff()) return false;
   try {
     await execFileAsync("test", ["-x", SOFFICE], { env: childEnv() });
     await execFileAsync("test", ["-x", PDFINFO], { env: childEnv() });
@@ -89,12 +85,8 @@ export async function probeResumeLayout(
     // is shared, and under the hosted connector several users can ask at once.
     const outDir = dir;
     await oneAtATime(() =>
-      execFileAsync(
-        SOFFICE,
-        ["--headless", "--invisible", "--norestore", `-env:UserInstallation=${LO_PROFILE}`,
-          "--convert-to", "pdf", "--outdir", outDir, docxPath],
-        { timeout: 90_000, env: HEADLESS_ENV },
-      ),
+      runLibreOffice(["--headless", "--invisible", "--norestore", `-env:UserInstallation=${LO_PROFILE}`,
+        "--convert-to", "pdf", "--outdir", outDir, docxPath]),
     );
     const pdf = (await readdir(dir)).find((f) => f.endsWith(".pdf"));
     if (!pdf) return null;

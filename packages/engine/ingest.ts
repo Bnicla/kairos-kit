@@ -250,6 +250,22 @@ async function fetchGreenhouseAd(url: string): Promise<IngestedAd | null> {
   });
 }
 
+/**
+ * The page a career site shows for a closed job. Some sites (Phenom-hosted ones among them) send
+ * it to any program that does not run JavaScript, even while the posting is open, so the fetch
+ * cannot tell a closed job from an open one: it refuses the page and the user pastes the text.
+ */
+export class FilledPageError extends Error {
+  readonly code = "filled_page" as const;
+  constructor() {
+    super(
+      'the site answered with its "this job has been filled" page; some career sites send that page to programs while the posting is still open, so open the link in a browser to see',
+    );
+    this.name = "FilledPageError";
+  }
+}
+const FILLED_PAGE_RE = /job you are trying to apply for has been filled/i;
+
 export async function fetchJobAd(url: string): Promise<IngestedAd> {
   // ATS APIs first: exact structured text where the HTML page is JS-rendered.
   const viaApi = (await fetchAshbyAd(url)) ?? (await fetchWorkdayAd(url)) ?? (await fetchBambooHrAd(url));
@@ -279,6 +295,8 @@ export async function fetchJobAd(url: string): Promise<IngestedAd> {
           : "Fetched page had almost no readable text (likely JS-rendered or login-gated). Paste the text instead.",
       );
     }
+    // A "this job has been filled" page is not a posting: saved as one, it would be scored as the job.
+    if (FILLED_PAGE_RE.test(g.cleanText)) throw new FilledPageError();
     const rawTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? "";
     const title = sanitizeField(htmlToText(rawTitle), 200).value;
     return finishAd(g, { source_url: url, pageTitle: title }, { source_url: url });

@@ -1,8 +1,8 @@
 // NOTE: intentionally NOT "server-only" — imported by the MCP server (raw tsx)
 // as well as the Next app; the server-only guard throws outside Next's bundler.
 // Server-side by construction (spawns LibreOffice).
-import { existsSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { copyFile, rename, rm, readdir, readFile } from "node:fs/promises";
 import { dirname, join, basename } from "node:path";
@@ -31,15 +31,84 @@ export function sofficePath(): string {
   return candidates.find((p): p is string => !!p && existsSync(p)) ?? process.env.SOFFICE_PATH ?? "/opt/homebrew/bin/soffice";
 }
 const SOFFICE = sofficePath();
-// Isolated profile so conversion never pops a window or collides with the
-// user's own LibreOffice session. Distinct from the layout probe's profile so
-// the two can run concurrently without locking each other out.
-const LO_PROFILE = "file:///tmp/lo-kairos-pdf";
-// svp = LibreOffice's true headless display backend: it never touches the macOS
-// window server, so no icon flashes into the Dock/app tray on each conversion
-// (plain --headless still registers a GUI app on macOS and bounces the Dock).
-// A short environment of its own (child-env.ts): LibreOffice gets none of the server's settings.
-const HEADLESS_ENV = childEnv({ SAL_USE_VCLPLUGIN: "svp" });
+/**
+ * Set to "1", LibreOffice is treated as absent: nothing is rendered and the layout is not measured.
+ * The tests set it (tests/setup.ts) unless KAIROS_LO_TESTS=1 asks for the real program, because on
+ * macOS every conversion brings LibreOffice up as a foreground app and a test run does dozens.
+ */
+export const libreOfficeOff = (): boolean => process.env.KAIROS_NO_LIBREOFFICE === "1";
+
+/**
+ * LibreOffice's profile folder for this process and this use ("pdf", "probe"): its own, so a
+ * conversion never opens a window, never meets the user's own LibreOffice, and never meets another
+ * Kairos process (the dashboard, the tool server, a test worker). Two programs on one profile hand
+ * their work to whichever started first, and that one is then left running when its starter ends.
+ */
+const profileDirs = new Set<string>();
+export function libreOfficeProfile(use: string): string {
+  const dir = `/tmp/lo-kairos-${use}-${process.pid}`;
+  if (!profileDirs.size) removeProfilesOfEndedProcesses();
+  profileDirs.add(dir);
+  return `file://${dir}`;
+}
+/** A process that was killed could not remove its folders (the exit hook below did not run): the next one does. */
+function removeProfilesOfEndedProcesses(): void {
+  try {
+    for (const name of readdirSync("/tmp")) {
+      const pid = Number(name.match(/^lo-kairos-[a-z]+-(\d+)$/)?.[1]);
+      if (!pid || pid === process.pid) continue;
+      try {
+        process.kill(pid, 0); // still running: its folder is in use
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") rmSync(`/tmp/${name}`, { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // Best effort: a folder left in /tmp does no harm.
+  }
+}
+
+/**
+ * The option that once kept LibreOffice off the macOS window server (29 August 2026). Measured on
+ * 15 November 2026 with LibreOffice 26.2.4 on macOS 26.6.2: it changes nothing, the program is a
+ * foreground app during a conversion with or without it. Kept because it is harmless and right on Linux.
+ * A short environment of its own (child-env.ts): LibreOffice gets none of the server's settings.
+ */
+export const HEADLESS_ENV = childEnv({ SAL_USE_VCLPLUGIN: "svp" });
+
+/** The conversions in progress, so that none outlives this process. */
+const running = new Set<ChildProcess>();
+let exitHook = false;
+function stopWithThisProcess(): void {
+  if (exitHook) return;
+  exitHook = true;
+  process.once("exit", () => {
+    // SIGKILL, not SIGTERM: LibreOffice answers SIGTERM by aborting, which macOS records as a crash.
+    for (const child of running) child.kill("SIGKILL");
+    for (const dir of profileDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // The folder is in /tmp; the system clears it later.
+      }
+    }
+  });
+}
+
+/** Run LibreOffice once with these arguments. Rejects when it fails or takes more than 90 seconds. */
+export function runLibreOffice(args: string[]): Promise<void> {
+  stopWithThisProcess();
+  return new Promise((resolve, reject) => {
+    const child = execFile(SOFFICE, args, { timeout: 90_000, killSignal: "SIGKILL", env: HEADLESS_ENV }, (err) => {
+      running.delete(child);
+      if (err) reject(err);
+      else resolve();
+    });
+    running.add(child);
+  });
+}
+
+const LO_PROFILE = libreOfficeProfile("pdf");
 
 /**
  * One conversion at a time: every conversion uses the same LibreOffice profile
@@ -54,6 +123,7 @@ export function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
 }
 
 async function sofficePresent(): Promise<boolean> {
+  if (libreOfficeOff()) return false;
   try {
     await execFileAsync("test", ["-x", SOFFICE], { env: childEnv() });
     return true;
@@ -76,12 +146,8 @@ async function convertDocxToPdf(docxPath: string): Promise<string | null> {
   const stem = basename(docxPath).replace(/\.docx$/i, "");
   const wantPdf = join(outDir, `${stem}.pdf`);
   try {
-    await execFileAsync(
-      SOFFICE,
-      ["--headless", "--invisible", "--norestore", `-env:UserInstallation=${LO_PROFILE}`,
-        "--convert-to", "pdf", "--outdir", outDir, docxPath],
-      { timeout: 90_000, env: HEADLESS_ENV },
-    );
+    await runLibreOffice(["--headless", "--invisible", "--norestore", `-env:UserInstallation=${LO_PROFILE}`,
+      "--convert-to", "pdf", "--outdir", outDir, docxPath]);
     // soffice names the output after the input stem; confirm it landed.
     const produced = (await readdir(outDir)).find(
       (f) => f.toLowerCase() === `${stem.toLowerCase()}.pdf`,

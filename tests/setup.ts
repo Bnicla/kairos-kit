@@ -7,3 +7,10 @@
 import { setTransport } from "../packages/engine/safe-fetch";
 
 setTransport((url, _addresses, init) => fetch(url.toString(), { ...init, redirect: "manual" }));
+
+/**
+ * LibreOffice is treated as absent in the tests (apps/local/lib/pdf-render.ts, libreOfficeOff) unless
+ * KAIROS_LO_TESTS=1 asks for the real program: `KAIROS_LO_TESTS=1 npx vitest run`. On macOS each
+ * conversion brings LibreOffice up as a foreground app, and the suite does dozens of them.
+ */
+if (process.env.KAIROS_LO_TESTS !== "1") process.env.KAIROS_NO_LIBREOFFICE = "1";
