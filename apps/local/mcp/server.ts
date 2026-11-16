@@ -1240,12 +1240,21 @@ server.registerTool(
           return before === after ? [] : [`+ résumé heading: "${before}" becomes "${after}" on every later résumé`];
         })
       : [];
-    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip([...changedFields(existing, update, ["resume_choices", "resume_headings"]), ...choiceLines, ...headingLines]));
+    // One sentence kept under two findings (a count of years and its line) is one line for the user to read, not two.
+    const refused = await askToSave(confirmer, "change your profile (changed fields only)", clip([...changedFields(existing, update, ["resume_choices", "resume_headings"]), ...new Set(choiceLines), ...headingLines]));
     if (refused) return fail(refused);
     const body =
       "# Candidate profile\n\nIdentity and targeting used to prioritize roles and ground generation.\n";
     await store.writeFile(["profile.md"], matter.stringify(body, merged));
-    return ok({ ok: true, saved: "profile.md", profile: merged });
+    // Seen in claude.ai on 15 November 2026: after a rename Claude wrote the Word file of three saved résumés again,
+    // unasked, and could not tell whether they had changed. They had not: a saved résumé keeps its headings.
+    const headingsNote = headingLines.length
+      ? {
+          headings_note:
+            "The new heading is on every résumé written from now on (save_resume). A résumé already saved keeps the headings it was written with, and writing its Word file again (render_docx) does not change them: do not render saved résumés again for this. Tell the user in one line that the résumés already written keep the old heading until they are written again, and write one again only if they ask.",
+        }
+      : {};
+    return ok({ ok: true, saved: "profile.md", ...headingsNote, profile: merged });
   }),
 );
 

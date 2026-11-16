@@ -477,7 +477,9 @@ export function namesEducation(label: string, education: EducationRef[]): boolea
 export function titleHeld(title: string, entries: Experience[], own = ""): boolean {
   const wanted = flatWords(title);
   if (!wanted.trim()) return true;
-  // A title the person wrote themselves, in their profile or their own résumé, is theirs under any entry.
+  // A title the person wrote themselves, in their own résumé or their own summary, is theirs under any entry. What the
+  // profile says they look for (its headline, its target roles) is not a title they held: seen in claude.ai on
+  // 15 November 2026, "Frontend Engineer" was put on an internship unremarked because the headline said "Junior Frontend Engineer".
   if (own && own.split("\n").some((line) => flatWords(line).includes(wanted))) return true;
   return entries.some((e) => {
     const stripped = stripUnverified(e);
@@ -534,6 +536,8 @@ export function checkResumeGrounding(
      * count of years they wrote there themselves is theirs.
      */
     ownWriting?: string;
+    /** The texts a title may be the person's own from: their own résumé and summary. Without it, the extra corpus and `ownWriting`. */
+    ownTitles?: string;
   } = {},
 ): GroundingIssue[] {
   const issues: GroundingIssue[] = [];
@@ -562,7 +566,7 @@ export function checkResumeGrounding(
     const project = own.every((e) => e.frontmatter.kind === "project");
     const title = (exp.title ?? "").trim();
     if (project && (!title || /^project$/i.test(title))) continue;
-    if (!titleHeld(title, own, `${extraCorpus}\n${opts.ownWriting ?? ""}`)) {
+    if (!titleHeld(title, own, opts.ownTitles ?? `${extraCorpus}\n${opts.ownWriting ?? ""}`)) {
       issues.push({
         kind: "unknown_title",
         key: keyOf("title", exp.company, title),

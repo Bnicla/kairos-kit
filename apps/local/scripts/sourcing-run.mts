@@ -115,8 +115,10 @@ console.log(
     : `▸ Sweeping up to ${MAX_BOARDS ?? registry.length} boards · recency cap ${searchProfile.max_age_days}d`,
 );
 const liveUrls = new Set<string>();
+const unreachedBoards: RegistryEntry[] = [];
 const result = await runSourcingSweep({
   liveUrls,
+  unreachedBoards,
   registry,
   extraBoards,
   profile: searchProfile,
@@ -217,6 +219,7 @@ const { ledger, newlySurfaced, vanishedShortlisted } = updateSeenLedger({
   actionedUrls,
   boardUrls: new Set((backlog ?? []).map((b) => postingKey(b.url))),
   liveUrls,
+  unreachedBoards,
 });
 writeJsonAtomic("sweep-seen.json", ledger);
 

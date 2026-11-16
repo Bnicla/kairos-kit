@@ -390,19 +390,24 @@ export async function saveGeneratedResume(
   if (renamed) gen.resume.headings = renamed;
   else delete gen.resume.headings;
   gen.resume.executive_summary = summaryAsBullets(gen.resume.executive_summary);
+  const baseResume = (await store.readFile(["base-resume.md"])) ?? "";
   const extraCorpus = [
-    profileRaw,
-    (await store.readFile(["base-resume.md"])) ?? "",
+    profileAsEvidence(profileRaw),
+    baseResume,
     ...education, // credentials and education entries are checked against these
   ].join("\n");
+  // The person's own résumé and summary blocks: a title or a count of years written there is theirs.
+  const ownWriting = [(await store.readFile(["knowledge-base", "reference-resume.md"])) ?? "", (await store.readFile(["knowledge-base", "_summary-blocks.md"])) ?? ""].join("\n");
   const grounding = checkResumeGrounding(gen, experiences, extraCorpus, {
     educationRecorded: education.length > 0,
     targetCompany: (await readMeta(store, appId))?.company,
     educationEntries,
     statedSkills: Array.isArray(profileData.skills) ? profileData.skills.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [],
     jobText: snapshotBody(await readSnapshot(store, appId)),
-    // The person's own résumé and summary blocks: a title or a count of years written there is theirs.
-    ownWriting: [(await store.readFile(["knowledge-base", "reference-resume.md"])) ?? "", (await store.readFile(["knowledge-base", "_summary-blocks.md"])) ?? ""].join("\n"),
+    ownWriting,
+    // A title is theirs where they wrote it of themselves: their own résumé, their summary blocks, their own summary.
+    // The profile's headline and target roles say what they look for, and do not make a title one they held.
+    ownTitles: [baseResume, ownWriting, typeof profileData.summary === "string" ? profileData.summary : ""].join("\n"),
   });
   const warnings: string[] = [];
   const choices = resumeChoices(profileData);
@@ -464,7 +469,10 @@ export async function saveGeneratedResume(
   for (const f of stretchAll.filter(claimsMoreThanTheFact)) {
     found.push({ key: keyOf("verb", f.company, f.trigger, f.bullet), kind: "says_more_than_the_fact", line: f.bullet, say: sayOf("says_more_than_the_fact", f.trigger, f.bullet), what: `"${f.trigger}" (${f.company}): ${f.detail}. Say what the person did in the knowledge base's own words; another verb for the same claim changes nothing` });
   }
-  const stretch = stretchAll.filter((f) => f.kind === "stretch" && !claimsMoreThanTheFact(f));
+  // A count of years that the dates do not give is raised once, by the check of years above (tools/years.ts): the same
+  // count is not listed a second time as a total. Seen in claude.ai on 15 November 2026: one sentence, three remarks.
+  const yearKeys = new Set(found.filter((f) => f.kind.startsWith("years_")).map((f) => f.key));
+  const stretch = stretchAll.filter((f) => f.kind === "stretch" && !claimsMoreThanTheFact(f) && !(f.rule === "total" && yearKeys.has(keyOf("years", f.trigger))));
 
   // Page-2 anchor (layout invariant): the profile can name the role that must
   // head page 2 (frontmatter `resume_page2_anchor`, matched against role
@@ -687,6 +695,22 @@ export function snapshotBody(snapshot: string | null): string {
 }
 
 /** The profile's fields (frontmatter); empty when it does not parse. */
+/**
+ * The profile as evidence: what the person says of themselves. Their remembered choices and renamed headings are
+ * settings, not statements. A choice's key holds the very words it keeps ("years|three years"): read as evidence, it
+ * made those words a fact, so the finding was no longer found at all, and the answer counted one kept choice where
+ * the user had made two (seen in claude.ai on 15 November 2026). A profile with neither field is returned as it is.
+ */
+export function profileAsEvidence(profileRaw: string): string {
+  try {
+    const parsed = matter(profileRaw);
+    const { resume_choices: choices, resume_headings: headings, ...rest } = (parsed.data ?? {}) as Record<string, unknown>;
+    return choices === undefined && headings === undefined ? profileRaw : matter.stringify(parsed.content, rest);
+  } catch {
+    return profileRaw;
+  }
+}
+
 export function profileFields(profileRaw: string): Record<string, unknown> {
   try {
     return (matter(profileRaw).data ?? {}) as Record<string, unknown>;

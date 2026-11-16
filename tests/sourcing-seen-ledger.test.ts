@@ -128,6 +128,33 @@ describe("updateSeenLedger", () => {
     expect(second.vanishedShortlisted).toHaveLength(0);
   });
 
+  it("does not alert when the role's board did not answer this run (throttled or failed)", () => {
+    const wd = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Remote/Principal-PM_JR1";
+    const ash = "https://jobs.ashbyhq.com/Acme/123";
+    const closed = "https://jobs.ashbyhq.com/other/456";
+    const first = updateSeenLedger({
+      previous: {},
+      survivors: [posting(wd), posting(ash), posting(closed)],
+      stretch: [],
+      ranAt: RUN1,
+      lane: "daily",
+      actionedUrls: new Set(),
+    });
+    const second = updateSeenLedger({
+      previous: first.ledger,
+      survivors: [],
+      stretch: [],
+      ranAt: RUN2,
+      lane: "daily",
+      actionedUrls: new Set(),
+      unreachedBoards: [
+        { ats: "workday", slug: "acme@wd1@External" },
+        { ats: "ashby", slug: "Acme" },
+      ],
+    });
+    expect(second.vanishedShortlisted.map((e) => e.url)).toEqual([closed]);
+  });
+
   it("does not alert when the role is still listed by its ATS but aged out of the window or was filtered", () => {
     const first = updateSeenLedger({
       previous: {},

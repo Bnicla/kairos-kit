@@ -1,3 +1,4 @@
+import type { RegistryEntry } from "./types";
 import type { RankedPosting } from "./types";
 import { postingKey } from "./url-key";
 
@@ -69,6 +70,11 @@ export interface LedgerRunInput {
    * Greenhouse by first_published aged 27 live roles out and all 27 alerted).
    */
   liveUrls?: Set<string>;
+  /**
+   * Boards that did not answer this run. A shortlisted role on one of them is unknown, not
+   * closed (2026-11-16: 3,146 throttled Workday boards raised 7 false vanished alerts).
+   */
+  unreachedBoards?: RegistryEntry[];
 }
 
 export interface LedgerUpdateResult {
@@ -84,6 +90,22 @@ export interface LedgerUpdateResult {
 }
 
 const canonical = postingKey;
+
+/**
+ * A lowercase piece of text every posting URL of this board contains. Workday slugs are
+ * "tenant@wdN@site" and its URLs live on tenant.wdN.myworkdayjobs.com; BambooHR uses the
+ * company subdomain; the shared hosts (Greenhouse, Lever, Ashby, ...) carry the slug as a
+ * path segment.
+ */
+export function boardUrlMarker(b: RegistryEntry): string {
+  const slug = b.slug.toLowerCase();
+  if (b.ats === "workday") {
+    const [tenant, wd] = slug.split("@");
+    return `${tenant}.${wd}.myworkdayjobs.com`;
+  }
+  if (b.ats === "bamboohr") return `${slug}.bamboohr.com`;
+  return `/${slug}/`;
+}
 
 /**
  * Re-key a stored ledger with postingKey, merging entries that are the same
@@ -148,6 +170,7 @@ export function updateSeenLedger(input: LedgerRunInput): LedgerUpdateResult {
   fold(input.dropped, "dropped");
 
   const vanishedShortlisted: SeenLedgerEntry[] = [];
+  const unreached = (input.unreachedBoards ?? []).map(boardUrlMarker);
   if (input.lane === "daily") {
     for (const [key, e] of Object.entries(ledger)) {
       if (!e.ever_shortlisted || e.vanished_at) continue;
@@ -157,6 +180,7 @@ export function updateSeenLedger(input: LedgerRunInput): LedgerUpdateResult {
       if (e.last_lane === "deep") continue;
       if (sighted.has(key) || input.actionedUrls.has(key)) continue;
       if (input.boardUrls?.has(key) || input.liveUrls?.has(key)) continue;
+      if (unreached.some((m) => e.url.toLowerCase().includes(m))) continue;
       ledger[key] = { ...e, vanished_at: input.ranAt };
       vanishedShortlisted.push(ledger[key]);
     }

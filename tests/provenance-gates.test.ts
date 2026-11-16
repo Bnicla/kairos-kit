@@ -577,10 +577,8 @@ describe("save path", () => {
       ["line_with_no_origin", "Raised revenue by 40%."],
     ]);
     expect(long.findings.put_right[0]!.what).toMatch(/^"Ten years" \(summary\): the dates of .* give 7 years\./);
-    expect(long.stretch.map((f) => [f.company, f.rule, f.trigger])).toEqual([
-      ["Executive summary", "total", "Ten years"],
-      ["Orbit Freight", "number", "40%"],
-    ]);
+    // The count of years is raised once, above: the check of wording does not list it a second time as a total.
+    expect(long.stretch.map((f) => [f.company, f.rule, f.trigger])).toEqual([["Orbit Freight", "number", "40%"]]);
     // A count of years the dates allow is for the person to settle: it was worked out from dates, and nobody stated it.
     const res = await saveGeneratedResume(store, meta.id, pmResume({ summary: "Seven years as a product manager, at Orbit Freight and Pelican Maps.", bullets: ["Launched carrier scorecards in 3 markets."] }));
     expect(res.stretch).toEqual([]);

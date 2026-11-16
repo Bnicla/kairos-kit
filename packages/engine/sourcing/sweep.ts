@@ -66,6 +66,14 @@ export interface SweepInput {
    * closed from one that only aged out of the recency window or was filtered.
    */
   liveUrls?: Set<string>;
+  /**
+   * Filled with the boards that did not answer this run (failed or rate-limited after the
+   * retry). Their postings are unknown, not closed: the vanished alert skips them.
+   */
+  unreachedBoards?: RegistryEntry[];
+  /** Passed to fetchBoards: the pause before the second pass on rate-limited boards, and its time budget. */
+  rateLimitRetryPauseMs?: number;
+  rateLimitRetryBudgetMs?: number;
   maxBoards?: number;
   /**
    * Most postings sent to triage in one run, over all batches (default
@@ -307,6 +315,18 @@ export interface FetchBoardsInput {
    * Absent: nothing changes.
    */
   onBoard?: (entry: RegistryEntry, outcome: "ok" | "partial" | FetchFailureKind) => void;
+  /**
+   * Rate-limited boards get one slower second pass after the main pass (2026-11-16: a
+   * Monday run from the Mac had 3,146 Workday boards throttled at 12 workers, against 15
+   * on the cloud run). Pause before it, in ms; 0 skips the second pass. Default 20 s.
+   */
+  rateLimitRetryPauseMs?: number;
+  /**
+   * Time the second pass may take, in ms; boards it has not reached by then stay counted
+   * as rate-limited. Default: no limit. A web request with a time limit (Cloud's /api/source)
+   * sets one.
+   */
+  rateLimitRetryBudgetMs?: number;
 }
 
 /**
@@ -352,26 +372,56 @@ export async function fetchBoards(input: FetchBoardsInput): Promise<{ postings: 
   for (const b of input.boards) {
     (byAts.get(b.ats) ?? byAts.set(b.ats, []).get(b.ats)!).push(b);
   }
-  await Promise.all(
-    [...byAts.entries()].flatMap(([ats, queue]) => {
-      const workers = Math.min(
-        input.perAtsConcurrency?.[ats as RegistryEntry["ats"]] ?? PER_ATS_DEFAULT[ats] ?? 4,
-        concurrency,
-      );
-      return Array.from({ length: workers }, async () => {
-        for (;;) {
-          const entry = queue.shift();
-          if (!entry) return;
-          const { postings, failure, partial } = await fetchBoardDetailed(entry, undefined, input.fetchOptions);
-          all.push(...postings);
-          account(ats, failure, partial);
-          input.onBoard?.(entry, failure ? failure.kind : partial ? "partial" : "ok");
-          done++;
-          if (done % 100 === 0) input.onProgress?.(done, input.boards.length, all.length);
-        }
-      });
-    }),
+  const retry: RegistryEntry[] = [];
+  const retryPause = input.rateLimitRetryPauseMs ?? 20_000;
+  const runPass = (groups: Map<string, RegistryEntry[]>, workersFor: (ats: string) => number, deferThrottled: boolean, stopAt = Infinity) =>
+    Promise.all(
+      [...groups.entries()].flatMap(([ats, queue]) => {
+        const workers = Math.min(workersFor(ats), concurrency);
+        return Array.from({ length: workers }, async () => {
+          for (;;) {
+            if (Date.now() >= stopAt) return;
+            const entry = queue.shift();
+            if (!entry) return;
+            const { postings, failure, partial } = await fetchBoardDetailed(entry, undefined, input.fetchOptions);
+            if (deferThrottled && failure?.kind === "rate_limited") {
+              retry.push(entry);
+              continue;
+            }
+            all.push(...postings);
+            account(ats, failure, partial);
+            input.onBoard?.(entry, failure ? failure.kind : partial ? "partial" : "ok");
+            done++;
+            if (done % 100 === 0) input.onProgress?.(done, input.boards.length, all.length);
+          }
+        });
+      }),
+    );
+  await runPass(
+    byAts,
+    (ats) => input.perAtsConcurrency?.[ats as RegistryEntry["ats"]] ?? PER_ATS_DEFAULT[ats] ?? 4,
+    retryPause > 0,
   );
+  if (retry.length) {
+    await new Promise((r) => setTimeout(r, retryPause));
+    const again = new Map<string, RegistryEntry[]>();
+    for (const b of retry) (again.get(b.ats) ?? again.set(b.ats, []).get(b.ats)!).push(b);
+    // A third of the first-pass width, at least 2: slow enough to stay under the throttle.
+    await runPass(
+      again,
+      (ats) => Math.max(2, Math.floor((input.perAtsConcurrency?.[ats as RegistryEntry["ats"]] ?? PER_ATS_DEFAULT[ats] ?? 4) / 3)),
+      false,
+      input.rateLimitRetryBudgetMs === undefined ? Infinity : Date.now() + input.rateLimitRetryBudgetMs,
+    );
+    // Boards the second pass did not reach within its budget stay rate-limited.
+    for (const [ats, left] of again) {
+      for (const entry of left) {
+        account(ats, { kind: "rate_limited" });
+        input.onBoard?.(entry, "rate_limited");
+        done++;
+      }
+    }
+  }
   input.onProgress?.(done, input.boards.length, all.length);
   return { postings: all, stats };
 }
@@ -401,6 +451,11 @@ export async function runSourcingSweep(input: SweepInput): Promise<SweepResultFi
         perAtsConcurrency: input.perAtsConcurrency,
         fetchOptions,
         onProgress: input.onProgress,
+        rateLimitRetryPauseMs: input.rateLimitRetryPauseMs,
+        rateLimitRetryBudgetMs: input.rateLimitRetryBudgetMs,
+        onBoard: (entry, outcome) => {
+          if (outcome !== "ok" && outcome !== "partial" && outcome !== "gone") input.unreachedBoards?.push(entry);
+        },
       });
   for (const p of all) input.liveUrls?.add(postingKey(p.url));
 

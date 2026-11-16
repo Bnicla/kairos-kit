@@ -852,3 +852,68 @@ describe("a résumé's section headings: the defaults stay, and a user can renam
     expect(html).not.toContain("Executive Summary");
   });
 });
+
+describe("what the checks in claude.ai found (15 November 2026)", () => {
+  // A student: a capstone and an internship. The profile says what they look for.
+  const capstone = entry("01-state-university-capstone.md", "id: capstone\ncompany: State University\ntitle: Capstone Project Lead\nstart: '2025-09'\nend: present", [
+    "Lead a team of 4 building a study-scheduling app for students in Flutter.",
+    "Presented to a faculty panel and won second place.",
+  ]);
+  const intern = entry("02-ledgerly-intern.md", "id: ledgerly-intern\ncompany: Ledgerly\ntitle: Software Engineering Intern\nstart: '2025-06'\nend: '2025-08'", [
+    "Built a dashboard in React that the operations team uses daily.",
+    "Wrote Python tests for the data pipeline.",
+  ]);
+  const profile = (extra = "") => `---\nname: Jordan Example\nheadline: Junior Frontend Engineer, React\ntarget_roles:\n  - Frontend Engineer\n${extra}---\n# Candidate profile\n`;
+  const draft = (over: { title?: string; summary?: string } = {}): GeneratedResume =>
+    resume({
+      summary: over.summary ?? "- **Internal Tools:** Built a dashboard in React that the operations team uses daily.",
+      experience: [
+        { company: "State University", title: "Capstone Project Lead", dates: "Sep 2025 - Present", bullets: ["Lead a team of 4 building a study-scheduling app for students in Flutter."] },
+        { company: "Ledgerly", title: over.title ?? "Software Engineering Intern", dates: "Jun 2025 - Aug 2025", bullets: ["Built a dashboard in React that the operations team uses daily.", "Wrote Python tests for the data pipeline."] },
+      ],
+      audit: [{ claim: "Built a dashboard in React", source_experience: "02-ledgerly-intern.md", prov: "R" }],
+    });
+  const home = async (profileText = profile()) => {
+    const store = new LocalStore(await mkdtemp(path.join(tmpdir(), "kairos-open-checks-")));
+    const file = (e: typeof intern) => `---\nid: ${e.frontmatter.id}\ncompany: ${e.frontmatter.company}\ntitle: ${e.frontmatter.title}\nstart: '${e.frontmatter.start}'\nend: ${e.frontmatter.end === "present" ? "present" : `'${e.frontmatter.end}'`}\n---\n\n${e.body}\n`;
+    for (const e of [capstone, intern]) await store.writeFile(["knowledge-base", "experiences", e.fileName], file(e));
+    await store.writeFile(["profile.md"], profileText);
+    const app = await createApplication(store, { company: "Northwind Labs", role: "Junior Frontend Engineer", snapshotMarkdown: "# Junior Frontend Engineer\nReact dashboards.", source_url_unavailable: true });
+    return { store, appId: app.id };
+  };
+
+  it("a title the profile only looks for is not a title held: put on a role, it is raised", async () => {
+    const { store, appId } = await home();
+    const res = await saveGeneratedResume(store, appId, draft({ title: "Frontend Engineer" }), { whenItDiffers: "warn" });
+    const title = res.findings.put_right.find((f) => f.kind === "unknown_title");
+    expect(title).toMatchObject({ key: "title|ledgerly|frontend engineer", say: 'The title "Frontend Engineer" is on this résumé. Your knowledge base has another title for that entry.' });
+    expect(title!.what).toContain('"Frontend Engineer" under "Ledgerly" is not a title the knowledge base holds for that entry (it holds "Software Engineering Intern")');
+    // The entry's own title raises nothing.
+    expect((await saveGeneratedResume(store, appId, draft(), { whenItDiffers: "warn" })).findings.put_right.map((f) => f.kind)).not.toContain("unknown_title");
+    // A title the person wrote of themselves, in their own résumé, is still theirs.
+    await store.writeFile(["knowledge-base", "reference-resume.md"], "Jordan Example\n\nLedgerly\nFrontend Engineer, summer 2025\n");
+    expect((await saveGeneratedResume(store, appId, draft({ title: "Frontend Engineer" }), { whenItDiffers: "warn" })).findings.put_right.map((f) => f.kind)).not.toContain("unknown_title");
+  });
+
+  it("a count of years the dates do not give is raised once, not a second time as a total; kept, both of its findings are kept", async () => {
+    const { store, appId } = await home();
+    const summary = "- Three years building React interfaces.\n- **Internal Tools:** Built a dashboard in React that the operations team uses daily.";
+    const res = await saveGeneratedResume(store, appId, draft({ summary }), { whenItDiffers: "warn" });
+    const mine = res.findings.put_right.filter((f) => /three years/i.test(`${f.line ?? ""} ${f.what}`));
+    expect(mine.map((f) => [f.kind, f.key])).toEqual([
+      ["years_exceed_dates", "years|three years"],
+      ["line_with_no_origin", "line|three years building react interfaces"],
+    ]);
+    expect(mine[0]!.say).toBe('A line says "Three years". The dates of that role in your knowledge base give fewer.');
+    expect(mine[1]!.say).toBe('This line rests on nothing in your knowledge base: "Three years building React interfaces.".');
+    // The same count is not listed again by the check of wording, which finds it on its own.
+    expect(checkResumeStretch(draft({ summary }), [capstone, intern], "").filter((f) => f.rule === "total").map((f) => f.trigger)).toEqual(["Three years"]);
+    expect(res.stretch.filter((f) => f.rule === "total")).toEqual([]);
+    // The user keeps the sentence: neither finding is raised again, and both are counted as kept.
+    await store.writeFile(["profile.md"], profile("resume_choices:\n  - key: 'years|three years'\n    says: The sentence stays as it is\n    since: '2026-11-15'\n  - key: 'line|three years building react interfaces'\n    says: The sentence stays as it is\n    since: '2026-11-15'\n"));
+    const again = await saveGeneratedResume(store, appId, draft({ summary }), { whenItDiffers: "warn" });
+    expect(again.findings.put_right.filter((f) => /three years/i.test(`${f.line ?? ""} ${f.what}`))).toEqual([]);
+    expect(again.findings.kept_by_choice.map((f) => f.kind).sort()).toEqual(["line_with_no_origin", "years_exceed_dates"]);
+    expect(again.stretch.filter((f) => f.rule === "total")).toEqual([]);
+  });
+});

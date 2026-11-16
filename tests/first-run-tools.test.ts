@@ -487,8 +487,29 @@ describe("Kairos MCP server: the first import after a document was read", () => 
     expect(asked[0]!.message).toContain('+ résumé heading: "Executive Summary" becomes "Summary" on every later résumé');
     expect(asked[0]!.message).toContain('+ résumé heading: "Professional Experience" becomes "Experience" on every later résumé');
     expect(readFileSync(join(home, "profile.md"), "utf8")).toMatch(/resume_headings:\n\s+summary: Summary\n\s+experience: Experience\n/);
+    // The answer says that a résumé already saved keeps its headings, so that Claude does not write the saved files again for nothing.
+    expect(JSON.parse(text(renamed)).headings_note).toBe(
+      "The new heading is on every résumé written from now on (save_resume). A résumé already saved keeps the headings it was written with, and writing its Word file again (render_docx) does not change them: do not render saved résumés again for this. Tell the user in one line that the résumés already written keep the old heading until they are written again, and write one again only if they ask.",
+    );
+    // Which is so: the Word file written again from the saved résumé has the headings it was saved with.
+    await client.callTool({ name: "render_docx", arguments: { appId } });
+    expect(await headings()).toEqual(["## Executive Summary", "## Professional Experience", "## Skills"]);
     await client.callTool({ name: "save_resume", arguments: { appId, resume } });
     expect(await headings()).toEqual(["## Summary", "## Experience", "## Skills"]);
+    // A change of the profile that renames no heading carries no such note.
+    answers.push({ action: "accept" });
+    expect(JSON.parse(text(await client.callTool({ name: "save_profile", arguments: { headline: "Software engineer" } })))).not.toHaveProperty("headings_note");
+    // One sentence kept under two findings is one line in the approval, not the same line twice.
+    asked.length = 0;
+    answers.push({ action: "accept" });
+    await client.callTool({ name: "save_profile", arguments: { resume_choices: [{ key: "years|three years", says: "The sentence stays as it is" }, { key: "line|three years building dashboards", says: "The sentence stays as it is" }] } });
+    expect(asked[0]!.message.match(/kept on every résumé, and not raised again: The sentence stays as it is/g)).toHaveLength(1);
+    expect(readFileSync(join(home, "profile.md"), "utf8")).toMatch(/key: years\|three years[\s\S]*key: line\|three years building dashboards/);
+    asked.length = 0;
+    answers.push({ action: "accept" });
+    await client.callTool({ name: "save_profile", arguments: { resume_choices: [{ key: "years|three years", remove: true }, { key: "line|three years building dashboards", remove: true }] } });
+    expect(asked[0]!.message.match(/no longer kept on every résumé: The sentence stays as it is/g)).toHaveLength(1);
+    expect(readFileSync(join(home, "profile.md"), "utf8")).not.toContain("three years");
     // The Writer's evidence names the user's headings.
     // One heading renamed later leaves the other as it is; its default name puts the default back.
     answers.push({ action: "accept" });
