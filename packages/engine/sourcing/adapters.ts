@@ -1,4 +1,5 @@
 import type { Posting, RegistryEntry, SourcingAts } from "./types";
+import { http2Fetch } from "./http2-fetch";
 
 /**
  * Public ATS feed adapters. Every function talks DIRECTLY to the ATS's own
@@ -30,11 +31,21 @@ export class BoardFetchError extends Error {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Node's own fetch, as loaded. A test that stubs the global fetch replaces it, and then every call goes to the stub. */
+const nativeFetch = globalThis.fetch;
+
+/**
+ * Workday is asked over HTTP/2 (http2-fetch.ts says why: the CDN in front of Workday challenges
+ * Node's HTTP/1.1 fetch on many tenants). Only where fetch is still Node's own:
+ * a stubbed fetch in tests keeps receiving every call.
+ */
+const viaHttp2 = (url: string) => globalThis.fetch === nativeFetch && /^https:\/\/[^/]+\.myworkdayjobs\.com\//i.test(url);
+
 async function getJson(url: string, init?: RequestInit): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await (viaHttp2(url) ? http2Fetch : fetch)(url, {
         ...init,
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: { accept: "application/json", "user-agent": "kairos-sourcing/1.0", ...(init?.headers ?? {}) },
