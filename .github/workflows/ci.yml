@@ -49,7 +49,9 @@ jobs:
         run: npm run typecheck
       - name: Tests
         run: npx vitest run
+      # The installer and the dashboard run even when a test failed, so that one run shows both.
       - name: Installer (data folder from the demo, daily task, dashboard start file)
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           node install.mjs --yes --skip-npm --home "$env:RUNNER_TEMP\Kairos Kit data" --demo --daily 08:15 --dashboard
@@ -62,6 +64,7 @@ jobs:
           $changed = git status --porcelain
           if ($changed) { Write-Output "The installer changed tracked files:"; Write-Output $changed; exit 1 }
       - name: The dashboard starts and answers
+        if: ${{ !cancelled() }}
         run: node scripts/check-dashboard.mjs
       - name: Remove the daily task and the start file
         if: always()

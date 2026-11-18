@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +73,26 @@ describe("finding and starting programs", () => {
 
   it("a full path without an ending takes the one that exists on Windows", () => {
     expect(startCommand(join(other, "tool"), [], windows).file).toBe(toolExe);
+  });
+
+  // The two tests above check the command line as text. These two start real programs, on Windows only
+  // (the Kit's CI): a .cmd file through cmd.exe is the one way npm and an npm-installed Claude Code start there.
+  it.skipIf(process.platform !== "win32")("on Windows, a real .cmd file in a folder with a space runs and gets each argument", () => {
+    const folder = join(dir, "with space");
+    mkdirSync(folder);
+    const cmd = join(folder, "show-args.cmd");
+    // %~1 is the first argument without its quotes.
+    writeFileSync(cmd, "@echo off\r\necho [%~1][%~2][%~3]\r\n");
+    const start = startCommand(cmd, ["-p", "", "a b"]);
+    const out = execFileSync(start.file, start.args, { ...start.options, encoding: "utf8" });
+    expect(out.trim()).toBe("[-p][][a b]");
+  });
+
+  it.skipIf(process.platform !== "win32")("on Windows, npm is found on the real PATH and starts", () => {
+    const start = startCommand("npm", ["--version"]);
+    expect(start.args.join(" ")).toMatch(/npm\.cmd/i);
+    const out = execFileSync(start.file, start.args, { ...start.options, encoding: "utf8" });
+    expect(out.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 
   it("uses CLAUDE_CLI_PATH when it is set", () => {
