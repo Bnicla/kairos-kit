@@ -14,7 +14,6 @@ const ROOT = join(__dirname, "..");
 // apps/cloud/scripts in this repo, apps/local/scripts in the exported kit.
 const SCRIPT = ["apps/cloud/scripts", "apps/local/scripts"].map((d) => join(ROOT, d, "harvest-registry.mts")).find(existsSync)!;
 const TRACKED = join(ROOT, "packages/engine/sourcing/registry.json");
-const TSX = join(ROOT, "node_modules/.bin/tsx");
 const sha = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
 describe("harvest-registry writes to the data folder", () => {
@@ -43,7 +42,8 @@ globalThis.fetch = async (url) => {
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
   const run = (...args: string[]) =>
-    execFileSync(TSX, [SCRIPT, ...args], {
+    // This Node with tsx loaded, the way scripts/daily.mjs starts each step (node_modules/.bin/tsx is a .cmd file on Windows).
+    execFileSync(process.execPath, ["--import", "tsx", SCRIPT, ...args], {
       cwd: ROOT,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

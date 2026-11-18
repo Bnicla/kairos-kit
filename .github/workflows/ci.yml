@@ -28,3 +28,61 @@ jobs:
         run: npm run typecheck
       - name: Tests
         run: npx vitest run
+      - name: The dashboard starts and answers
+        run: |
+          node install.mjs --yes --skip-npm --home "$RUNNER_TEMP/kairos-data" --demo
+          node scripts/check-dashboard.mjs
+
+  # The same tests on a Windows PC, then the Windows installer run for real:
+  # the data folder from the demo, the daily search in Task Scheduler, the
+  # dashboard's start file, and the dashboard itself.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npx vitest run
+      - name: Installer (data folder from the demo, daily task, dashboard start file)
+        shell: pwsh
+        run: |
+          node install.mjs --yes --skip-npm --home "$env:RUNNER_TEMP\Kairos Kit data" --demo --daily 08:15 --dashboard
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content .kairos-home
+          schtasks /Query /TN "Kairos Kit daily search" /V /FO LIST
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kairos Kit dashboard.cmd"
+          # The installer leaves the checkout as git gave it, so /update can pull.
+          $changed = git status --porcelain
+          if ($changed) { Write-Output "The installer changed tracked files:"; Write-Output $changed; exit 1 }
+      - name: The dashboard starts and answers
+        run: node scripts/check-dashboard.mjs
+      - name: Remove the daily task and the start file
+        if: always()
+        shell: pwsh
+        run: |
+          node install.mjs --schedule-only --no-daily
+          Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kairos Kit dashboard.cmd" -ErrorAction SilentlyContinue
+
+  # LibreOffice on Windows: found where its installer puts it, and a Word
+  # résumé comes out as a PDF. A job of its own, because installing LibreOffice
+  # takes a few minutes and its result reads apart from the tests'.
+  windows-render:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install LibreOffice
+        run: choco install libreoffice-fresh -y --no-progress
+      - name: A Word résumé becomes a PDF
+        run: node --import tsx scripts/check-render.mts

@@ -11,6 +11,7 @@ import type { AtsExpect } from "@kairos/engine/ats-text";
 import { childEnv } from "./child-env";
 import { checkPdfAts, libreOfficeOff, libreOfficeProfile, oneAtATime, pdftotextPath, runLibreOffice, sofficePath, type AtsCheck } from "./pdf-render";
 import { existsSync } from "node:fs";
+import { findProgram, isRunnable } from "./programs";
 
 /**
  * Visual layout probe: render a .docx to PDF and MEASURE the real page count
@@ -26,9 +27,11 @@ import { existsSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 const SOFFICE = sofficePath();
-// poppler's pdfinfo: PDFINFO_PATH, then Homebrew's spots, then the system's (Linux).
+// poppler's pdfinfo: PDFINFO_PATH, then Homebrew's spots, then the system's (Linux), then PATH (Windows: pdfinfo.exe).
 const PDFINFO =
-  [process.env.PDFINFO_PATH, "/opt/homebrew/bin/pdfinfo", "/usr/local/bin/pdfinfo", "/usr/bin/pdfinfo"].find((p): p is string => !!p && existsSync(p)) ?? "/opt/homebrew/bin/pdfinfo";
+  [process.env.PDFINFO_PATH, "/opt/homebrew/bin/pdfinfo", "/usr/local/bin/pdfinfo", "/usr/bin/pdfinfo"].find((p): p is string => !!p && existsSync(p)) ??
+  findProgram("pdfinfo") ??
+  "/opt/homebrew/bin/pdfinfo";
 // Its own LibreOffice profile folder, apart from the PDF render's (pdf-render.ts, libreOfficeProfile).
 const LO_PROFILE = libreOfficeProfile("probe");
 
@@ -51,13 +54,7 @@ export interface LayoutProbe {
 
 async function toolsPresent(): Promise<boolean> {
   if (libreOfficeOff()) return false;
-  try {
-    await execFileAsync("test", ["-x", SOFFICE], { env: childEnv() });
-    await execFileAsync("test", ["-x", PDFINFO], { env: childEnv() });
-    return true;
-  } catch {
-    return false;
-  }
+  return isRunnable(SOFFICE) && isRunnable(PDFINFO);
 }
 
 /**

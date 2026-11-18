@@ -25,5 +25,5 @@ scratch/
 # If you point KAIROS_HOME inside the kit by mistake, keep it out of git:
 /Kairos/
 
-# Where install.sh recorded your data folder (a path on this Mac only).
+# Where the installer recorded your data folder (a path on this computer only).
 .kairos-home

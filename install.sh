@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Kairos Kit installer (macOS).
+# Kairos Kit installer for macOS. On Windows, run: node install.mjs
 #
 #   ./install.sh                     interactive
 #   ./install.sh --yes               accept the defaults, no services
@@ -104,7 +104,7 @@ if [ "$SCHEDULE_ONLY" = 1 ]; then
   [ -d "$HOME_DIR" ] || fail "Data folder not found: $HOME_DIR (run ./install.sh first)"
 else
 # --- 1. Checks -----------------------------------------------------------------
-[ "$(uname)" = "Darwin" ] || warn "This installer is written for macOS. Packages and the data folder will work elsewhere; the services will not."
+[ "$(uname)" = "Darwin" ] || warn "This installer is written for macOS. On Windows, run 'node install.mjs' instead. On Linux the packages and the data folder will work; the services will not."
 
 command -v node >/dev/null || fail "Node.js not found. Install Node 22 (https://nodejs.org or 'brew install node@22') and re-run."
 # 22.17 or newer within 22, or 24 and later (what the PDF renderer's Chromium package supports; 23 is not).
@@ -120,9 +120,9 @@ else
 fi
 
 if [ -x /Applications/LibreOffice.app/Contents/MacOS/soffice ] || command -v soffice >/dev/null; then
-  ok "LibreOffice found (exact page counts for résumés)"
+  ok "LibreOffice found (PDF copies of your résumés; with poppler, page counts measured on them)"
 else
-  warn "LibreOffice not found (optional). Without it, page fit is estimated instead of measured. 'brew install --cask libreoffice' adds it."
+  warn "LibreOffice not found (optional). Without it you get the Word file only, and page fit is estimated instead of measured. 'brew install --cask libreoffice' adds it."
 fi
 
 case "$KIT" in
@@ -167,12 +167,14 @@ ok "Data folder recorded in .kairos-home (read by the server, the dashboard and 
 # Claude Code starts project MCP servers from the kit folder, so the paths stay
 # relative. The data folder comes from .kairos-home, so this file is the same
 # for everyone and git sees no change (older installs wrote an env block here).
+# `node --import tsx`, not `npx tsx`: the same line starts the server on
+# Windows, where npx is a .cmd file that Claude Code cannot start directly.
 cat > "$KIT/.mcp.json" <<JSON
 {
   "mcpServers": {
     "kairos": {
-      "command": "npx",
-      "args": ["tsx", "apps/local/mcp/server.ts"]
+      "command": "node",
+      "args": ["--import", "tsx", "apps/local/mcp/server.ts"]
     }
   }
 }

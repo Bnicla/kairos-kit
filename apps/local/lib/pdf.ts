@@ -72,6 +72,12 @@ function localChromePath(): string | undefined {
     "/usr/bin/google-chrome",
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
+    // Windows: Chrome, then Edge, which every Windows 10 and 11 has.
+    ...[process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LOCALAPPDATA].flatMap((dir) =>
+      dir && process.platform === "win32"
+        ? [`${dir}\\Google\\Chrome\\Application\\chrome.exe`, `${dir}\\Microsoft\\Edge\\Application\\msedge.exe`]
+        : [],
+    ),
   ];
   // Lazy require to avoid bundling fs in edge contexts.
   // eslint-disable-next-line @typescript-eslint/no-require-imports

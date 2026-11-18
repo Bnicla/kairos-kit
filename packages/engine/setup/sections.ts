@@ -278,7 +278,7 @@ export const SETTINGS: Record<string, SettingInfo & { asked?: false }> = {
   "search_profile.board.max_sourced_cards": { file: "sourcing/search-profile.json", effect: "Sourced cards shown on the board column.", default: "10." },
   "search_profile.daily_run": { file: "sourcing/search-profile.json", effect: "Container for the daily-run settings.", default: "On at 08:15." },
   "search_profile.daily_run.enabled": { file: "sourcing/search-profile.json", effect: "Daily search on or off.", default: "On." },
-  "search_profile.daily_run.time": { file: "sourcing/search-profile.json", effect: "Local time of the daily search (install.sh --daily HH:MM applies it).", default: "08:15." },
+  "search_profile.daily_run.time": { file: "sourcing/search-profile.json", effect: "Local time of the daily search (the installer's --daily HH:MM applies it: install.sh on a Mac, install.mjs on Windows).", default: "08:15." },
   "search_profile.source": { file: "sourcing/search-profile.json", effect: "'confirmed' once the user has answered; 'derived' when guessed.", default: "derived (set to confirmed by /setup).", asked: false },
   "search_profile.updated_at": { file: "sourcing/search-profile.json", effect: "Written by every save.", default: "Set automatically.", asked: false },
 

@@ -15,7 +15,7 @@ flowchart LR
   mcp <--> data[(Data folder<br/>~/Kairos)]
   engine[Engine<br/>packages/engine] --- mcp
   dash[Dashboard<br/>apps/local, localhost:3000] <--> data
-  daily[Daily job search<br/>scripts/daily.sh] --> data
+  daily[Daily job search<br/>scripts/daily.sh or daily.mjs] --> data
   daily -- "public job-board APIs" --> boards[(Greenhouse, Lever, Ashby,<br/>Workday, SmartRecruiters, BambooHR)]
   ext[Chrome extension<br/>apps/autofill-extension] <-- "token, localhost" --> dash
   cc -. "/apply, Claude in Chrome" .-> forms[Application form<br/>in the user's Chrome]
@@ -29,7 +29,7 @@ flowchart LR
 | Engine | The code the server, the dashboard and the scripts share: scoring evidence, résumé checks, rendering, the job search, the knowledge base's health check. No model calls. | `packages/engine` |
 | Data folder | Everything about the user, as Markdown and JSON files. Outside the repository. | `KAIROS_HOME`, default `~/Kairos` |
 | Dashboard | A local web page over the data folder: the board, the knowledge base, sourced roles, the funnel. It answers only on this computer. | `apps/local/app` |
-| Daily job search | Reads public job-board APIs, filters and ranks postings against the user's search profile, and puts the best on the board as Sourced. | `scripts/daily.sh`, `apps/local/scripts/sourcing-run.mts`, `packages/engine/sourcing` |
+| Daily job search | Reads public job-board APIs, filters and ranks postings against the user's search profile, and puts the best on the board as Sourced. | `scripts/daily.sh` (Mac), `scripts/daily.mjs` (Windows), `apps/local/scripts/sourcing-run.mts`, `packages/engine/sourcing` |
 | Chrome extension | Optional. Fills Greenhouse, Lever and Ashby forms from the knowledge base. | `apps/autofill-extension` |
 
 Model calls happen in two places only. Claude Code, under the user's own Claude

@@ -30,6 +30,7 @@ import type { RegistryEntry } from "@kairos/engine/sourcing/types";
 import { resolveRegistry } from "@kairos/engine/sourcing/registry-loader";
 import { postingKey } from "@kairos/engine/sourcing/url-key";
 import { kairosHome } from "../../local/store/local-fs";
+import { startCommand } from "../../local/lib/programs";
 
 const execFileAsync = promisify(execFile);
 
@@ -153,7 +154,9 @@ const result = await runSourcingSweep({
     // transient CLI error (observed 2026-09-08).
     const run = async () => {
       // Triage only writes text, and its prompt is posting text: no tools, no MCP servers, no saved session.
-      const child = execFileAsync(claude, ["-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence"], { timeout: 8 * 60_000, maxBuffer: 10 * 1024 * 1024 });
+      // On Windows `claude` is claude.exe, or claude.cmd from an npm install, which starts through cmd.exe (programs.ts).
+      const start = startCommand(claude, ["-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence"]);
+      const child = execFileAsync(start.file, start.args, { ...start.options, timeout: 8 * 60_000, maxBuffer: 10 * 1024 * 1024 });
       child.child.stdin?.write(prompt);
       child.child.stdin?.end();
       const { stdout } = await child;

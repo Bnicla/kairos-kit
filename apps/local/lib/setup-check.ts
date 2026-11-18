@@ -11,6 +11,8 @@ import { execFile } from "node:child_process";
 import { childEnv } from "./child-env";
 import path from "node:path";
 import { emptySetupState } from "@kairos/engine/setup/status";
+import { claudeProgram, isRunnable, startCommand } from "./programs";
+import { sofficePath } from "./pdf-render";
 
 export const DATA_FOLDERS = [
   "knowledge-base/experiences",
@@ -52,9 +54,9 @@ export async function ensureDataFolder(home: string): Promise<{ home: string; ex
   return { home, existed, created, has_data };
 }
 
-function run(cmd: string, args: string[], cwd?: string): Promise<string | null> {
+function run(cmd: string, args: string[], cwd?: string, options: { windowsVerbatimArguments?: boolean } = {}): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(cmd, args, { cwd, timeout: 8000, env: childEnv() }, (err, stdout) => resolve(err ? null : String(stdout).trim()));
+    execFile(cmd, args, { ...options, cwd, timeout: 8000, env: childEnv() }, (err, stdout) => resolve(err ? null : String(stdout).trim()));
   });
 }
 
@@ -98,16 +100,28 @@ export async function checkInstall(opts: { root?: string; fetchImpl?: typeof fet
   const node = { version: process.versions.node, ok: major >= 22, ...(major < 22 ? { note: "Kairos Kit needs Node 22 or newer." } : {}) };
   if (!node.ok) warnings.push(`Node ${process.versions.node} is too old: install Node 22 or newer.`);
 
-  const claudeVersion = await run("sh", ["-lc", "command -v claude >/dev/null && claude --version"]);
+  // macOS and Linux: a login shell, because the tool server's own PATH may not hold ~/.local/bin.
+  // Windows has no sh: the program is looked up directly (lib/programs.ts).
+  const windows = process.platform === "win32";
+  const claudeDirect = () => {
+    const start = startCommand(claudeProgram(), ["--version"]);
+    return run(start.file, start.args, undefined, start.options);
+  };
+  const claudeVersion = windows ? await claudeDirect() : ((await run("sh", ["-lc", "command -v claude >/dev/null && claude --version"])) ?? (await claudeDirect()));
   const claude_cli = claudeVersion ? { found: true, version: claudeVersion.split("\n")[0] } : { found: false };
   if (!claude_cli.found) warnings.push("The claude command was not found on PATH. The daily search needs it.");
 
   const soffice =
-    (await run("sh", ["-lc", "command -v soffice"])) ??
-    ((await exists("/Applications/LibreOffice.app/Contents/MacOS/soffice")) ? "/Applications/LibreOffice.app" : null);
+    (windows ? null : await run("sh", ["-lc", "command -v soffice"])) ??
+    ((await exists("/Applications/LibreOffice.app/Contents/MacOS/soffice")) ? "/Applications/LibreOffice.app" : null) ??
+    // The same search the renderer makes (SOFFICE_PATH, the installer's folders on Windows, PATH).
+    (isRunnable(sofficePath()) ? sofficePath() : null);
   const libreoffice = soffice
     ? { found: true, note: "PDF export and the page-layout check will use it." }
-    : { found: false, note: "Optional. Without it, résumés export as Word files and page fit is estimated from word counts." };
+    : {
+        found: false,
+        note: "Optional. Without it, résumés export as Word files and page fit is estimated from word counts. The installer is at libreoffice.org; set SOFFICE_PATH if it is installed in a place Kairos does not look.",
+      };
 
   const origin = await run("git", ["-C", root, "remote", "get-url", "origin"]);
   const repo: InstallReport["repo"] = { root, origin };

@@ -1,6 +1,6 @@
 # Security
 
-Kairos Kit runs on the user's own Mac and keeps the user's knowledge base in a
+Kairos Kit runs on the user's own computer and keeps the user's knowledge base in a
 local folder. It reads text it does not control (job postings, application
 forms, web pages) and writes documents that go out under the user's name. How
 it is protected is described in [docs/architecture.md](docs/architecture.md#controls).
@@ -26,11 +26,15 @@ personal project maintained by one person, and there is no bounty.
 
 ## Known limits
 
-These are known and accepted for a single-user tool on the user's own Mac.
+These are known and accepted for a single-user tool on the user's own computer.
 
-- **The data folder is not encrypted by the kit.** It relies on the macOS
-  account and FileVault. `install.sh` creates it readable by the user only, and
-  warns when an existing folder is readable by other accounts.
+- **The data folder is not encrypted by the kit.** It relies on the computer's
+  user account and disk encryption (FileVault on a Mac; BitLocker or device
+  encryption on Windows). On a Mac, `install.sh` creates it readable by the
+  user only, and warns when an existing folder is readable by other accounts.
+  On Windows, `install.mjs` sets no permissions: the default place is inside
+  the user's own folder, which Windows keeps from other standard accounts; a
+  folder chosen elsewhere with `--home` has that place's permissions.
 - **Claude Code's own permissions are the user's.** The kit cannot stop the user
   from approving a tool call, or from setting a hook that answers Kairos's save
   confirmations automatically. The confirmations need a Claude Code version
@@ -50,4 +54,5 @@ These are known and accepted for a single-user tool on the user's own Mac.
   `npm audit` until that upgrade is done.
 - **The daily search** stores a Claude Code token for unattended runs in
   `~/.config/kairos/claude-oauth-token`; the getting-started guide has the user
-  make it readable by them only.
+  make it readable by them only (on Windows the file is under the user's own
+  folder and the kit sets no permissions on it).

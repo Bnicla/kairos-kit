@@ -20,8 +20,16 @@ Rules:
 
 Commands:
 - Tests: `npm test`. Typecheck: `npm run typecheck`. Personal-data scan: `npm run scan`.
-- Dashboard: `npm run dev` (http://localhost:3000), unless `install.sh` set it up
-  as the service `com.kairos-kit.dashboard`. Run only one dashboard at a time.
+- Dashboard: `npm run dev` (http://localhost:3000), unless the installer set it
+  up to start at login (on a Mac the service `com.kairos-kit.dashboard`; on
+  Windows the Startup file "Kairos Kit dashboard.cmd"). Run only one dashboard
+  at a time.
 - Résumé from a spec: `npx tsx apps/local/scripts/tailor-resume.mts <spec.json>`.
 - Job search now: `npm -w kairos-local run sourcing-run`.
-- The daily run is `scripts/daily.sh`; its log is `$KAIROS_HOME/logs/daily.log`.
+- The daily run is `scripts/daily.sh` on a Mac and `scripts/daily.mjs` on
+  Windows (Task Scheduler: "Kairos Kit daily search"); its log is
+  `logs/daily.log` in the data folder.
+- The installer is `./install.sh` on a Mac and `node install.mjs` on Windows,
+  with the same options. On Windows the Bash tool is Git Bash, which has no
+  zsh and no `launchctl`: never run `./install.sh` there. Commands written with
+  `node`, `npm`, `npx` and `git` are the same on both.

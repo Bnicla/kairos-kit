@@ -6,10 +6,13 @@ import { execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { copyFile, rename, rm, readdir, readFile } from "node:fs/promises";
 import { dirname, join, basename } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import matter from "@kairos/engine/front-matter";
 import { checkAtsText, type AtsExpect, type AtsResult } from "@kairos/engine/ats-text";
 import { submissionFileName, type SubmissionDoc } from "@kairos/engine/file-names";
 import { childEnv } from "./child-env";
+import { findProgram, isRunnable, windowsProgramFolders } from "./programs";
 
 /**
  * Render a .docx to a PDF sitting next to it (same directory, same stem).
@@ -24,11 +27,18 @@ import { childEnv } from "./child-env";
 const execFileAsync = promisify(execFile);
 /**
  * LibreOffice's command-line program: SOFFICE_PATH, then Homebrew's link, then
- * the app itself (where `brew install --cask libreoffice` and the download put it).
+ * the app itself (where `brew install --cask libreoffice` and the download put it),
+ * then on Windows the folders its installer uses, then `soffice` on PATH.
  */
 export function sofficePath(): string {
-  const candidates = [process.env.SOFFICE_PATH, "/opt/homebrew/bin/soffice", "/usr/local/bin/soffice", "/Applications/LibreOffice.app/Contents/MacOS/soffice"];
-  return candidates.find((p): p is string => !!p && existsSync(p)) ?? process.env.SOFFICE_PATH ?? "/opt/homebrew/bin/soffice";
+  const candidates = [
+    process.env.SOFFICE_PATH,
+    "/opt/homebrew/bin/soffice",
+    "/usr/local/bin/soffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ...windowsProgramFolders().map((dir) => join(dir, "LibreOffice", "program", "soffice.exe")),
+  ];
+  return candidates.find((p): p is string => !!p && existsSync(p)) ?? process.env.SOFFICE_PATH ?? findProgram("soffice") ?? "/opt/homebrew/bin/soffice";
 }
 const SOFFICE = sofficePath();
 /**
@@ -45,22 +55,25 @@ export const libreOfficeOff = (): boolean => process.env.KAIROS_NO_LIBREOFFICE =
  * their work to whichever started first, and that one is then left running when its starter ends.
  */
 const profileDirs = new Set<string>();
+/** Where the profile folders go: /tmp on macOS and Linux, the user's temporary folder on Windows (it has no /tmp). */
+const PROFILE_ROOT = process.platform === "win32" ? tmpdir() : "/tmp";
 export function libreOfficeProfile(use: string): string {
-  const dir = `/tmp/lo-kairos-${use}-${process.pid}`;
+  const dir = join(PROFILE_ROOT, `lo-kairos-${use}-${process.pid}`);
   if (!profileDirs.size) removeProfilesOfEndedProcesses();
   profileDirs.add(dir);
-  return `file://${dir}`;
+  // LibreOffice takes the folder as an address: file:///tmp/… here, file:///C:/Users/… on Windows.
+  return pathToFileURL(dir).href;
 }
 /** A process that was killed could not remove its folders (the exit hook below did not run): the next one does. */
 function removeProfilesOfEndedProcesses(): void {
   try {
-    for (const name of readdirSync("/tmp")) {
+    for (const name of readdirSync(PROFILE_ROOT)) {
       const pid = Number(name.match(/^lo-kairos-[a-z]+-(\d+)$/)?.[1]);
       if (!pid || pid === process.pid) continue;
       try {
         process.kill(pid, 0); // still running: its folder is in use
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ESRCH") rmSync(`/tmp/${name}`, { recursive: true, force: true });
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") rmSync(join(PROFILE_ROOT, name), { recursive: true, force: true });
       }
     }
   } catch {
@@ -124,12 +137,7 @@ export function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
 
 async function sofficePresent(): Promise<boolean> {
   if (libreOfficeOff()) return false;
-  try {
-    await execFileAsync("test", ["-x", SOFFICE], { env: childEnv() });
-    return true;
-  } catch {
-    return false;
-  }
+  return isRunnable(SOFFICE);
 }
 
 /**
@@ -196,12 +204,14 @@ export async function writeSubmissionCopies(appDir: string): Promise<string[]> {
 
 // --- ATS text layer ---------------------------------------------------------
 
-// poppler's pdftotext: env override first, then the usual Homebrew/system spots.
+// poppler's pdftotext: env override first, then the usual Homebrew/system spots, then PATH
+// (where a Windows install of poppler is found, as pdftotext.exe).
 const PDFTOTEXT_CANDIDATES = [
   process.env.PDFTOTEXT_PATH,
   "/opt/homebrew/bin/pdftotext",
   "/usr/local/bin/pdftotext",
   "/usr/bin/pdftotext",
+  findProgram("pdftotext"),
 ].filter((p): p is string => !!p);
 
 let pdftotextResolved: string | null | undefined;
@@ -210,12 +220,7 @@ let pdftotextResolved: string | null | undefined;
 export async function pdftotextPath(): Promise<string | null> {
   if (pdftotextResolved !== undefined) return pdftotextResolved;
   for (const candidate of PDFTOTEXT_CANDIDATES) {
-    try {
-      await execFileAsync("test", ["-x", candidate], { env: childEnv() });
-      return (pdftotextResolved = candidate);
-    } catch {
-      /* try the next one */
-    }
+    if (isRunnable(candidate)) return (pdftotextResolved = candidate);
   }
   return (pdftotextResolved = null);
 }

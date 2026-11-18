@@ -1951,7 +1951,7 @@ const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
 /** The text of a connections file from a path on this computer: a .csv, LinkedIn's .zip, or the unzipped folder. */
 async function readConnectionsFile(input: string): Promise<string> {
   let file = input.trim();
-  if (file === "~" || file.startsWith("~/")) file = path.join(os.homedir(), file.slice(1));
+  if (file === "~" || file.startsWith("~/") || file.startsWith("~\\")) file = path.join(os.homedir(), file.slice(1));
   file = path.resolve(file);
   let stat = await fs.stat(file).catch(() => null);
   if (stat?.isDirectory()) {

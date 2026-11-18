@@ -68,7 +68,8 @@ describe("the dashboard listens on 127.0.0.1 only", () => {
   it("npm run dev and npm run start give the address, in the repository and in the Kit", () => {
     const scripts = JSON.parse(read("apps/local/package.json")).scripts as Record<string, string>;
     for (const name of ["dev", "start"]) {
-      expect(scripts[name], name).toMatch(new RegExp(`\\bnext ${name} -H 127\\.0\\.0\\.1$`));
+      // `next dev` here; in the Kit, scripts/dashboard.mjs, which hands the same words to Next (it also runs on Windows).
+      expect(scripts[name], name).toMatch(new RegExp(`(?:\\bnext|scripts/dashboard\\.mjs) ${name} -H 127\\.0\\.0\\.1$`));
       expect(scripts[name], name).not.toMatch(/0\.0\.0\.0|::/);
     }
     // The root's scripts hand over to these two and add no address of their own.

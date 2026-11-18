@@ -4,8 +4,8 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { claudeProgram, startCommand } from "./programs";
 
-const CLAUDE = () => process.env.CLAUDE_CLI_PATH ?? join(homedir(), ".local/bin/claude");
 // Long-lived headless token minted via `claude setup-token`. The interactive
 // OAuth session isn't visible to a dev-server or cron process, so we read the
 // token from this 0600 file and inject it — the same file daily-routine.sh uses.
@@ -36,7 +36,9 @@ export const CLAUDE_ARGS = ["-p", "--tools", "", "--strict-mcp-config", "--no-se
 
 export async function runClaude(prompt: string, timeoutMs = 10 * 60_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(CLAUDE(), CLAUDE_ARGS, { env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    // On Windows a Claude Code installed through npm is claude.cmd, which starts through cmd.exe (programs.ts).
+    const start = startCommand(claudeProgram(), CLAUDE_ARGS);
+    const child = spawn(start.file, start.args, { ...start.options, env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"] });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let size = 0;

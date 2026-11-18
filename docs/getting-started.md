@@ -2,13 +2,28 @@
 
 ## 0. Before you start
 
-- A Mac on macOS 14 or newer, with `git`: `xcode-select --install`.
+On a Mac:
+
+- macOS 14 or newer, with `git`: `xcode-select --install`.
 - Homebrew (brew.sh), then Node 22 (22.17 or newer) or 24: `brew install node@22`.
+
+On a Windows PC (the Windows installer is new; the README's "Status and limits"
+says what has been tested):
+
+- Windows 10 or 11.
+- Git for Windows, from git-scm.com. Claude Code on Windows uses the Git Bash
+  that comes with it.
+- Node 22 (22.17 or newer) or 24, from nodejs.org.
+
+On both:
+
 - Claude Code installed and signed in with a Claude Pro or Max plan. Run
-  `claude` once in Terminal to check.
+  `claude` once in Terminal (Mac) or PowerShell (Windows) to check.
 - Your résumé (PDF or DOCX). A LinkedIn export or other documents help.
 
 ## 1. Install
+
+On a Mac, in Terminal:
 
 ```bash
 git clone https://github.com/Bnicla/kairos-kit.git ~/kairos-kit
@@ -16,11 +31,26 @@ cd ~/kairos-kit
 ./install.sh
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+cd $HOME
+git clone https://github.com/Bnicla/kairos-kit.git
+cd kairos-kit
+node install.mjs
+```
+
+On Windows, keep the kit outside any folder OneDrive syncs (often Documents
+and Desktop). The commands in the rest of this guide (`claude`, `npm`, `git`)
+are the same on both; where this guide says `./install.sh`, use
+`node install.mjs` on Windows, with the same options.
+
 The installer:
 
 1. Checks Node (22 or newer), the Claude Code CLI and LibreOffice (optional).
 2. Installs the packages (`npm ci`).
-3. Creates the data folder. The default is `~/Kairos`; choose another with
+3. Creates the data folder. The default is `~/Kairos` (on Windows, `Kairos` in
+   your user folder, for example `C:\Users\you\Kairos`); choose another with
    `--home <folder>`. An existing folder is used as it is, except that a
    folder holding a knowledge base this kit did not create is refused unless you add
    `--use-existing`.
@@ -29,8 +59,17 @@ The installer:
    so they always use the same folder. `KAIROS_HOME`, when set, overrides it.
 5. Writes `.mcp.json`, which tells Claude Code how to start the Kairos server.
 6. Asks whether to run the dashboard at login and the job search every morning.
-   Both are macOS launchd services: `com.kairos-kit.dashboard` and
-   `com.kairos-kit.daily`. Flags: `--dashboard`, `--daily 08:15`.
+   Flags: `--dashboard`, `--daily 08:15`.
+   - On a Mac both are launchd services: `com.kairos-kit.dashboard` and
+     `com.kairos-kit.daily`.
+   - On Windows the daily search is a task in Task Scheduler, "Kairos Kit daily
+     search", which runs while you are signed in, also on battery, and at the
+     next chance when the PC was off or asleep at that time. A window named
+     "Kairos Kit daily search" is open while it runs and closes by itself. The
+     dashboard is a file in your Startup folder, "Kairos Kit dashboard.cmd",
+     which starts it in a minimized window when you sign in; closing that
+     window stops the dashboard. To remove them:
+     `node install.mjs --schedule-only --no-daily`, and delete the file.
 
 ## 2. First session
 
@@ -75,11 +114,15 @@ pay floor, industries and companies you will not consider. These go into
 - **Daily search (Scout):** new matches appear in the Sourced column each morning. Run
   it by hand with `npm -w kairos-local run sourcing-run`.
 
-The long-lived token for the daily run: the morning job runs without you
-logged in, so it cannot use your Claude Code login. Run `claude setup-token`
-and save the token in `~/.config/kairos/claude-oauth-token` (only you can read
-it: `chmod 600`). Without it, the search still runs but the matches are not
-ranked.
+The long-lived token for the daily run: on a Mac the morning job runs outside
+your login session, so it cannot use your Claude Code login. Run
+`claude setup-token` and save the token in
+`~/.config/kairos/claude-oauth-token` (only you can read it: `chmod 600`).
+Without it, the search still runs but the matches are not ranked. On Windows
+the task runs in your own session, where Claude Code keeps your sign-in in a
+file, so it is expected to work without the token; this has not been confirmed
+on a PC yet. If the morning's matches come unranked, save the token in
+`.config\kairos\claude-oauth-token` under your user folder.
 
 ## 4. Where your data lives
 
@@ -111,10 +154,19 @@ Updates change only the code. Your data folder is not touched.
 ## 6. Troubleshooting
 
 - **Claude does not see the Kairos tools:** start `claude` from the kit folder,
-  and check that `.mcp.json` exists there (re-run `./install.sh --skip-npm`).
-- **The dashboard does not load:** `launchctl kickstart -k gui/$(id -u)/com.kairos-kit.dashboard`,
-  then read `$KAIROS_HOME/logs/com.kairos-kit.dashboard.err.log`.
-- **The daily run did nothing:** read `$KAIROS_HOME/logs/daily.log`.
-- **The dashboard or `/find` shows the wrong knowledge base:** `cat .kairos-home` in
-  the kit folder shows the data folder in use. Re-run
-  `./install.sh --skip-npm --home <folder>` to change it.
+  and check that `.mcp.json` exists there (re-run the installer with
+  `--skip-npm`).
+- **The dashboard does not load:** on a Mac,
+  `launchctl kickstart -k gui/$(id -u)/com.kairos-kit.dashboard`, then read
+  `logs/com.kairos-kit.dashboard.err.log` in the data folder. On Windows, look
+  for the minimized window named "Kairos Kit dashboard" and read what it says;
+  if there is none, run `npm run dev` in the kit folder.
+- **The daily run did nothing:** read `logs/daily.log` in the data folder. On
+  Windows, also open Task Scheduler and look at the last result of "Kairos Kit
+  daily search".
+- **The dashboard or `/find` shows the wrong knowledge base:** the file
+  `.kairos-home` in the kit folder holds the data folder in use. Re-run the
+  installer with `--skip-npm --home <folder>` to change it.
+- **No PDF beside the Word file:** LibreOffice was not found. Install it from
+  libreoffice.org, or set `SOFFICE_PATH` to its `soffice` program
+  (`soffice.exe` on Windows) if it is installed somewhere unusual.

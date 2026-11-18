@@ -7,7 +7,12 @@
  * sealed tokens and the Google client's secret, and LibreOffice reads files a
  * user can influence. So every helper is started with this short list.
  */
-const KEPT = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "USER", "LOGNAME", "SystemRoot"];
+const KEPT = [
+  "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "USER", "LOGNAME",
+  // Windows: where the system, its programs and the user's own folders are. Programs there do not start without them.
+  "SystemRoot", "SystemDrive", "windir", "ComSpec", "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "USERNAME",
+  "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
+];
 
 export function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: Record<string, string> = {};

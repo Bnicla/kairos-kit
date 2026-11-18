@@ -368,16 +368,19 @@ Save: `save_autofill({ address, common_answers, eeo, share_eeo, defaults: { neve
 Daily job search on or off; the time it runs; how fresh postings must be (7
 days by default); how many new jobs the board shows (10 by default).
 Save: `save_search_profile({ daily_run: { enabled, time: "HH:MM" }, max_age_days, board: { max_sourced_cards }, source: "confirmed" })`.
-Saving the setting does not schedule anything on the Mac. Ask: "Shall I set
-the schedule on this Mac now? You will see a permission prompt for the command."
-On yes, run in the kit folder, with the Bash tool:
-`./install.sh --schedule-only --daily HH:MM` (or `./install.sh --schedule-only
---no-daily` when they turned it off). Read its last line back. If it fails, say
-so plainly, quote the error, and tell them the same command can be run by hand.
-Then tell them the three things to check later: the setting (saved), the
-schedule (installed or not), and the last run (`/status`, or the log at
-logs/daily.log in the data folder). The Mac must be awake at that time; a missed
-run happens at the next wake.
+Saving the setting does not schedule anything on the computer. Ask: "Shall I
+set the schedule on this computer now? You will see a permission prompt for the
+command." On yes, run the installer in the kit folder, with the Bash tool. It
+is `./install.sh` on a Mac and `node install.mjs` on Windows (never
+`./install.sh` on Windows: it is a zsh script), with the same options:
+`--schedule-only --daily HH:MM`, or `--schedule-only --no-daily` when they
+turned it off. Read its last line back. If it fails, say so plainly, quote the
+error, and tell them the same command can be run by hand. Then tell them the
+three things to check later: the setting (saved), the schedule (installed or
+not), and the last run (`/status`, or the log at logs/daily.log in the data
+folder). The computer must be on and they must be signed in at that time; a
+missed run happens at the next wake (on Windows, the next time the computer is
+on and they are signed in).
 
 ## The end
 

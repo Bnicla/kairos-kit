@@ -86,7 +86,7 @@ setting the engine reads has no section and no stated default.
 | `search_profile.board.max_sourced_cards` | sourcing/search-profile.json | 14. daily | 10. | Sourced cards shown on the board column. |
 | `search_profile.daily_run` | sourcing/search-profile.json | not asked | On at 08:15. | Container for the daily-run settings. |
 | `search_profile.daily_run.enabled` | sourcing/search-profile.json | 14. daily | On. | Daily search on or off. |
-| `search_profile.daily_run.time` | sourcing/search-profile.json | 14. daily | 08:15. | Local time of the daily search (install.sh --daily HH:MM applies it). |
+| `search_profile.daily_run.time` | sourcing/search-profile.json | 14. daily | 08:15. | Local time of the daily search (the installer's --daily HH:MM applies it: install.sh on a Mac, install.mjs on Windows). |
 | `search_profile.source` | sourcing/search-profile.json | not asked | derived (set to confirmed by /setup). | 'confirmed' once the user has answered; 'derived' when guessed. |
 | `search_profile.updated_at` | sourcing/search-profile.json | not asked | Set automatically. | Written by every save. |
 | `autofill.contact` | autofill.json | 1. identity | Name from profile.md; the rest is left blank on forms. | Form autofill: name, email, phone. |

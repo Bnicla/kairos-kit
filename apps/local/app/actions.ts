@@ -63,12 +63,12 @@ export async function sourceJobsAction(_prev: SourceJobsResult): Promise<SourceJ
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const { join } = await import("node:path");
-  const { homedir } = await import("node:os");
   const { readFileSync } = await import("node:fs");
+  const { claudeProgram, startCommand } = await import("@/lib/programs");
   const repoRoot = join(process.cwd(), "..", "..");
   const env = {
     ...process.env,
-    CLAUDE_CLI_PATH: process.env.CLAUDE_CLI_PATH ?? join(homedir(), ".local/bin/claude"),
+    CLAUDE_CLI_PATH: claudeProgram(),
   };
   // The sourcing script lives in this app in the kit and in the Cloud app in
   // the full repo: run it from whichever workspace declares it.
@@ -80,7 +80,10 @@ export async function sourceJobsAction(_prev: SourceJobsResult): Promise<SourceJ
     // keep the default
   }
   try {
-    await promisify(execFile)("npm", ["-w", workspace, "run", "sourcing-run"], {
+    // npm is npm.cmd on Windows, which starts through cmd.exe (lib/programs.ts).
+    const npm = startCommand("npm", ["-w", workspace, "run", "sourcing-run"]);
+    await promisify(execFile)(npm.file, npm.args, {
+      ...npm.options,
       cwd: repoRoot,
       env,
       timeout: 20 * 60_000,

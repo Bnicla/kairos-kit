@@ -4,9 +4,9 @@
   "private": true,
   "description": "Kairos local app: MCP server (Claude Code driver), dashboard over your data folder, and the daily job-search scripts.",
   "scripts": {
-    "dev": "KAIROS_LOCAL_ONLY=1 next dev -H 127.0.0.1",
+    "dev": "node ../../scripts/dashboard.mjs dev -H 127.0.0.1",
     "build": "next build",
-    "start": "KAIROS_LOCAL_ONLY=1 next start -H 127.0.0.1",
+    "start": "node ../../scripts/dashboard.mjs start -H 127.0.0.1",
     "mcp": "tsx mcp/server.ts",
     "sourcing-run": "tsx scripts/sourcing-run.mts",
     "prune-closed": "tsx scripts/prune-closed-listings.mts",

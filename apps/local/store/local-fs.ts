@@ -28,7 +28,8 @@ export function kairosHome(start: string = process.cwd()): string {
 }
 
 function expandTilde(p: string): string {
-  return p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p;
+  // "~\" is how the same path is written on Windows.
+  return p === "~" || p.startsWith("~/") || p.startsWith("~\\") ? path.join(os.homedir(), p.slice(1)) : p;
 }
 
 function readHomePointer(start: string): string | null {
@@ -125,7 +126,9 @@ export class LocalStore implements Store {
 
   async readFile(filePath: string[]): Promise<string | null> {
     try {
-      return await fs.readFile(this.abs(filePath), "utf8");
+      // A file saved by a Windows editor ends its lines with \r\n. The readers of the knowledge
+      // base split on \n, so the text is given with \n alone, whoever wrote the file.
+      return (await fs.readFile(this.abs(filePath), "utf8")).replace(/\r\n/g, "\n");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;

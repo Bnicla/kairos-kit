@@ -17,8 +17,11 @@ is outside it and is never changed by an update. Arguments: `$ARGUMENTS`
 5. Say what changed: `git log --oneline <old>..HEAD` (the old commit from step 2),
    in plain words, and whether a restart of Claude Code is needed (it is when
    files under `apps/local/mcp/` or `.claude/` changed).
-6. If the dashboard runs as a service, restart it:
-   `launchctl kickstart -k gui/$(id -u)/com.kairos-kit.dashboard`.
+6. If the dashboard starts at login, restart it. On a Mac it is a service:
+   `launchctl kickstart -k gui/$(id -u)/com.kairos-kit.dashboard`. On Windows
+   it runs in a minimized window named "Kairos Kit dashboard": ask the student
+   to close that window, then to open "Kairos Kit dashboard.cmd" in their
+   Startup folder (Win+R, `shell:startup`), or to sign out and in.
 7. If a stash was made in step 1, offer to restore it with `git stash pop`.
 8. Call `setup_status`. If the update added settings that are not set yet,
    name the parts to re-run with `/setup --section <name>`.

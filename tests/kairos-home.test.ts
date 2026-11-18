@@ -113,7 +113,7 @@ describe.skipIf(!zsh)("install.sh data folder", () => {
     expect(readFileSync(join(kit, ".kairos-home"), "utf8").trim()).toBe(target);
     const mcp = readFileSync(join(kit, ".mcp.json"), "utf8");
     expect(mcp).not.toContain("KAIROS_HOME");
-    expect(JSON.parse(mcp).mcpServers.kairos.args).toEqual(["tsx", "apps/local/mcp/server.ts"]);
+    expect(JSON.parse(mcp).mcpServers.kairos).toEqual({ command: "node", args: ["--import", "tsx", "apps/local/mcp/server.ts"] });
     // the re-run reads .kairos-home back
     const again = run();
     expect(again.code).toBe(0);

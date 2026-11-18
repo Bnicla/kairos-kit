@@ -26,7 +26,8 @@ describe("the environment of a helper program", () => {
     expect(env.SAL_USE_VCLPLUGIN).toBe("svp");
     for (const n of names) expect(env[n], n).toBeUndefined();
     expect(JSON.stringify(env)).not.toContain("a-secret-value");
-    expect(Object.keys(env).length).toBeLessThanOrEqual(12);
+    // A short list: the names in child-env.ts (a dozen on macOS and Linux, a few more on Windows) and the one added here.
+    expect(Object.keys(env).length).toBeLessThanOrEqual(25);
   });
 
   it("every program the local library and the tool server start gets that environment", () => {
@@ -48,7 +49,9 @@ describe("the environment of a helper program", () => {
         expect(/(?<![.\w])(?:spawn|exec|fork|execSync|spawnSync)\(/.test(text), `${name} starts a program another way`).toBe(false);
       }
     }
-    expect(calls).toBeGreaterThanOrEqual(8);
+    // LibreOffice, pdfinfo, pdftotext (twice) and the version checks. Whether a program is there is
+    // read from the file itself (lib/programs.ts), no longer by starting `test -x`, which Windows does not have.
+    expect(calls).toBeGreaterThanOrEqual(5);
     expect(without).toEqual([]);
   });
 });
@@ -69,7 +72,9 @@ describe("LibreOffice in the tests", () => {
 
   it("gives each process its own profile folder", async () => {
     const { libreOfficeProfile } = await import("@/lib/pdf-render");
-    expect(libreOfficeProfile("pdf")).toBe(`file:///tmp/lo-kairos-pdf-${process.pid}`);
+    // /tmp on macOS and Linux; on Windows the user's temporary folder, as an address (file:///C:/…).
+    if (process.platform === "win32") expect(libreOfficeProfile("pdf")).toMatch(new RegExp(`^file:///[A-Za-z]:/.*/lo-kairos-pdf-${process.pid}$`));
+    else expect(libreOfficeProfile("pdf")).toBe(`file:///tmp/lo-kairos-pdf-${process.pid}`);
     expect(libreOfficeProfile("probe")).not.toBe(libreOfficeProfile("pdf"));
   });
 });

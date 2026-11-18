@@ -1,7 +1,8 @@
 # Kairos Kit
 
-Kairos Kit is a job-search system that runs inside Claude Code on your own Mac.
-It keeps a knowledge base of your career built only from what you provide:
+Kairos Kit is a job-search system that runs inside Claude Code on your own
+computer. It is built and tested on a Mac; a Windows installer is included and
+is new (see "Status and limits"). It keeps a knowledge base of your career built only from what you provide:
 your résumé and other documents, a LinkedIn export, your answers to its
 questions, and notes you add. Every fact keeps its source. From that knowledge
 base it scores job postings, writes a tailored résumé for each application,
@@ -38,7 +39,7 @@ and Claude says whose work a piece is ("the Assessor's score"). The board
 (`/status`) and filling a form (`/apply`) are Claude's own.
 
 Your data is stored on your machine, in a data folder outside this repository
-(`~/Kairos` by default). There is no Kairos server: the parts a task needs go
+(a folder named `Kairos` in your user folder by default: `~/Kairos`). There is no Kairos server: the parts a task needs go
 to Anthropic through Claude Code, under your own Claude plan (see "What is sent
 to AI" below), and nowhere else.
 
@@ -68,14 +69,26 @@ amendment (0003).
 
 ## Try it with the demo knowledge base (about ten minutes)
 
-You need a Mac (macOS 14 or newer), Node.js 22.17 or newer, or 24 or newer
-(`brew install node@22`), and Claude Code signed in with a Claude Pro or Max
-plan.
+You need Node.js 22.17 or newer, or 24 or newer, `git`, and Claude Code signed
+in with a Claude Pro or Max plan.
+
+On a Mac (macOS 14 or newer; Node with `brew install node@22`), in Terminal:
 
 ```bash
 git clone https://github.com/Bnicla/kairos-kit.git ~/kairos-kit
 cd ~/kairos-kit
 ./install.sh --home ~/Kairos-demo --demo --no-dashboard --no-daily
+claude
+```
+
+On a Windows PC (Windows 10 or 11; Node from nodejs.org, Git for Windows from
+git-scm.com), in PowerShell:
+
+```powershell
+cd $HOME
+git clone https://github.com/Bnicla/kairos-kit.git
+cd kairos-kit
+node install.mjs --home $HOME\Kairos-demo --demo --no-dashboard --no-daily
 claude
 ```
 
@@ -88,13 +101,16 @@ a made-up student, Jordan Example. In Claude Code, try:
 - `/tailor`: a tailored résumé for one application, with the table of which
   facts cover which requirements, and the checks.
 
-Keep the kit outside `~/Documents`, `~/Desktop` and `~/Downloads`: macOS stops
-background services from running scripts in those folders.
+On a Mac, keep the kit outside `~/Documents`, `~/Desktop` and `~/Downloads`:
+macOS stops background services from running scripts in those folders. On
+Windows, keep it outside any folder OneDrive syncs (often Documents and
+Desktop): OneDrive tries to sync the package files and can lock them.
 
 ## Use it for your own search
 
 ```bash
-./install.sh
+./install.sh          # on a Mac
+node install.mjs      # on Windows
 claude
 ```
 
@@ -105,15 +121,21 @@ the two or three questions that would improve that résumé most. The rest of
 the first run comes when you choose: it asks for your other documents and
 fills every setting, which takes about twenty minutes.
 
-`install.sh` installs the packages, creates the data folder, records it in
-`.kairos-home`, writes `.mcp.json`, and asks whether to run the dashboard at
-login and the job search every morning. Run `./install.sh --help` for the
-options. It never changes a data folder that already exists, and it refuses a
-folder holding a knowledge base it did not create unless you add `--use-existing`.
+The installer (`install.sh` on a Mac, `install.mjs` on Windows; same options)
+installs the packages, creates the data folder, records it in `.kairos-home`,
+writes `.mcp.json`, and asks whether to run the dashboard at login and the job
+search every morning. Run it with `--help` for the options. It never changes a
+data folder that already exists, and it refuses a folder holding a knowledge
+base it did not create unless you add `--use-existing`.
 
 Optional:
-- LibreOffice (`brew install --cask libreoffice`), for exact résumé page
-  counts. Without it, page fit is estimated.
+- LibreOffice (`brew install --cask libreoffice` on a Mac, the installer from
+  libreoffice.org on Windows), for a PDF copy of each résumé beside the Word
+  file. Without it you get the Word file only.
+- poppler (`brew install poppler` on a Mac), with LibreOffice, for a page
+  count measured on the rendered résumé. Without both, page fit is estimated
+  from the word count. Windows has no standard installer for poppler; the
+  measured count works there when `pdfinfo` and `pdftotext` are on your PATH.
 - The Claude in Chrome extension, connected to Claude Code, for `/apply`:
   Claude fills an application form open in your Chrome, one page at a time.
   You submit.
@@ -158,10 +180,18 @@ data.
 
 ## Status and limits
 
-- macOS only. The MCP server is plain Node and may work elsewhere; the
-  installer and the background services are macOS-specific.
-- The kit is exported from the Kairos system its author uses every day for a
-  real job search. The kit itself has not yet been tested by other users.
+- Built and tested on a Mac (macOS 14 or newer). The kit is exported from the
+  Kairos system its author uses every day, on a Mac, for a real job search.
+- Windows 10 and 11 (PowerShell or Command Prompt, with Git for Windows) are
+  supported by `install.mjs` and by Windows versions of the daily search and of
+  the dashboard's start. This is new: the kit's tests run on Windows in this
+  repository's CI on every push, and it has not yet been used by a person on a
+  PC. Please report what does not work.
+- Linux, and Linux inside Windows (WSL): the MCP server, the dashboard and the
+  scripts are plain Node, and the tests run on Linux in CI. `node install.mjs`
+  installs the packages and the data folder there; nothing is set up to run in
+  the background.
+- The kit itself has not yet been tested by other users.
 - The job search covers the job systems listed above. Postings on other sites
   can be added by link.
 

@@ -1,0 +1,13 @@
+# Every text file is checked out with Unix line endings on every system.
+# Git for Windows otherwise gives \r\n, and the shell scripts and the demo
+# knowledge base are read line by line.
+* text=auto eol=lf
+
+# Not text.
+*.docx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.zip binary

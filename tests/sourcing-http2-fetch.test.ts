@@ -72,7 +72,8 @@ describe("http2Fetch keeps the process alive while a request is in flight", () =
       server.listen(0, "127.0.0.1", () => { server.unref(); const port = server.address().port;
         http2Fetch("http://127.0.0.1:" + port + "/").then(async (r) => { console.log("status", r.status, await r.text()); });
       });`;
-    const out = execFileSync("npx", ["tsx", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 30_000 });
+    // This Node with tsx loaded, not `npx tsx`: npx is a .cmd file on Windows, which cannot be started directly.
+    const out = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 30_000 });
     expect(out).toContain("status 200 ok");
   }, 40_000);
 });
