@@ -145,9 +145,10 @@ export function checkResumePerson(text: string): StyleViolation[] {
   // "Phase I", "Type I" and the like are numerals, not the pronoun.
   // Addresses and links are not prose ("about.me/…").
   const prose = text.replace(/\S*[@/.]\S*\w/g, " ");
-  const first = [...prose.matchAll(/\b(I|my|myself|me)\b/g)].filter((m) => m[1] !== "I" || !/\b(?:Phase|Type|Series|Class|Tier|Level|Part|Title|Stage|Grade|Category|Schedule|Division|Volume|Mark|Round|Section|Appendix|World War)\s+$/i.test(prose.slice(Math.max(0, m.index! - 14), m.index!)));
+  // A word ends where a letter of any alphabet ends: "Diplôme" does not hold the word "me" (seen on a résumé with a French degree, 18 November 2026).
+  const first = [...prose.matchAll(/(?<![\p{L}\p{N}_])(I|my|myself|me)(?![\p{L}\p{N}_])/gu)].filter((m) => m[1] !== "I" || !/\b(?:Phase|Type|Series|Class|Tier|Level|Part|Title|Stage|Grade|Category|Schedule|Division|Volume|Mark|Round|Section|Appendix|World War)\s+$/i.test(prose.slice(Math.max(0, m.index! - 14), m.index!)));
   if (first.length) out.push({ rule: "first-person", detail: `${[...new Set(first.map((m) => m[1]))].join(", ")} (résumés use implied first person: "Built…", not "I built…")` });
-  const hits = text.match(/\b(himself|herself|he|she|his|him)\b/gi);
+  const hits = text.match(/(?<![\p{L}\p{N}_])(himself|herself|he|she|his|him)(?![\p{L}\p{N}_])/giu);
   if (hits) out.push({ rule: "third-person", detail: `${[...new Set(hits.map((h) => h.toLowerCase()))].join(", ")} (résumés use implied first person)` });
   // The personal knowledge base is never named on an outside-facing document
   // (CLAUDE.md); describe it ("a personal agentic system") instead.

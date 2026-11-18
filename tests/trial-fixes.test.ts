@@ -416,6 +416,11 @@ describe("10. smaller ones", () => {
     expect(GENERATION_SYSTEM_PROMPT).toContain('NO "I", "my" or "me"');
   });
 
+  it("a word with an accented letter does not hold a pronoun", () => {
+    for (const fine of ["Diplôme d'ingénieur, Applied Mathematics and Computer Science (2016).", "Rebuilt the système de réservation for a client.", "Completed the deuxième cycle at the institute."]) expect(checkResumePerson(fine), fine).toEqual([]);
+    expect(checkResumePerson("Diplôme d'ingénieur; the course where I led my project team.").map((v) => v.rule)).toEqual(["first-person"]);
+  });
+
   it("the summary is a list, one line per bold opener, however it was written", () => {
     const list = "- **Scope:** Runs second shift.\n- **Results:** Cut mis-picks.";
     expect(summaryAsBullets("**Scope:** Runs second shift. **Results:** Cut mis-picks.")).toBe(list);
