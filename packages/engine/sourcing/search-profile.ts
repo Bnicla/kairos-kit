@@ -62,6 +62,60 @@ function defaultExcludes(levelText: string): string[] {
 const norm = (s: string) => s.toLowerCase().trim();
 
 /**
+ * Words that many professions share in a title. Alone, one of them lets through
+ * every title that holds it: "development" passes "Sales Development" and
+ * "Software Development Engineer" for someone who wrote "Business Development".
+ */
+const SHARED_ROLE_WORDS = new Set([
+  "business", "development", "management", "general", "global", "corporate", "strategic",
+  "analyst", "specialist", "coordinator", "assistant", "administrator", "representative",
+  "officer", "partner", "executive", "professional", "service", "services", "support",
+  "account", "customer", "client", "success", "human", "resources", "public", "relations",
+]);
+
+/**
+ * The search words of one target role.
+ * - A role in a built-in discipline: that discipline's words, as before.
+ * - Any other role: its own words without the level words ("senior", "intern":
+ *   with one of them as a search word, every title of that level would pass)
+ *   and without the words many professions share. "Management Consultant"
+ *   gives "consultant"; "Restaurant Manager" gives "restaurant".
+ * - A role made only of shared words is searched as one phrase:
+ *   "Business Development Intern" gives "business development".
+ * Heuristic by design: the preferences conversation is where it gets exact.
+ */
+function roleTerms(role: string): string[] {
+  const known = DISCIPLINE_VOCAB.filter((d) => role.includes(d));
+  if (known.length) return known;
+  const words = role.split(/[^a-z]+/).filter((w) => w.length > 3);
+  const roleWords = words.filter((w) => !LEVEL_WORDS.has(w));
+  if (!roleWords.length) return words;
+  const own = roleWords.filter((w) => !SHARED_ROLE_WORDS.has(w));
+  return own.length ? own : [roleWords.join(" ")];
+}
+
+/**
+ * Title words for an early-career level the candidate states. They rank a
+ * posting up and keep it among those read when a search finds more than it can
+ * read; they never remove one. Without them the internships a student asks for
+ * were crowded out by senior titles of the same field.
+ */
+function earlyLevelTerms(levelText: string): string[] {
+  const out: string[] = [];
+  if (/\bintern(?:ship)?s?\b/.test(levelText)) out.push("intern", "internship", "co-op");
+  if (/\bsummer\b/.test(levelText)) out.push("summer");
+  if (/\bmba\b/.test(levelText)) out.push("mba");
+  if (/\b(?:new )?grad(?:uate)?s?\b/.test(levelText)) out.push("graduate", "new grad");
+  if (/\bjunior\b/.test(levelText)) out.push("junior");
+  if (/\bentry\b/.test(levelText)) out.push("entry level");
+  if (/\btrainee\b/.test(levelText)) out.push("trainee");
+  if (/\bapprentice(?:ship)?\b/.test(levelText)) out.push("apprentice");
+  // "Associate Director" is a senior title: the word alone says nothing there.
+  if (/\bassociate\b/.test(levelText) && !SENIOR_LEVEL.test(levelText)) out.push("associate");
+  return out;
+}
+
+/**
  * Derive a starting search profile from the candidate's own profile.md.
  * Heuristic by design: the preferences conversation is where it gets exact.
  */
@@ -72,18 +126,13 @@ export function deriveSearchProfile(
   const roleText = (fm.target_roles ?? []).map(norm).join(" ");
   const seniorityText = `${roleText} ${norm(fm.target_seniority ?? "")}`;
 
-  const function_terms = DISCIPLINE_VOCAB.filter((d) => roleText.includes(d));
-  if (function_terms.length === 0 && fm.target_roles?.length) {
-    // Unknown discipline: fall back to the meaningful words of the first
-    // target role. Level words are left out when anything else remains: with
-    // "senior" or "manager" as a function term, every senior or manager title
-    // of any profession would pass the gate.
-    const words = norm(fm.target_roles[0]).split(/[^a-z]+/).filter((w) => w.length > 3);
-    const roleWords = words.filter((w) => !LEVEL_WORDS.has(w));
-    function_terms.push(...(roleWords.length ? roleWords : words));
-  }
+  // Each target role gives its own words: a role in a built-in discipline does
+  // not silence another role outside them ("Management Consultant" beside
+  // "Finance Associate" used to search for "finance" alone, 18 November 2026).
+  const function_terms: string[] = [];
+  for (const role of fm.target_roles ?? []) function_terms.push(...roleTerms(norm(role)));
 
-  const seniority_terms = SENIORITY_VOCAB.filter((s) => seniorityText.includes(s));
+  const seniority_terms = [...SENIORITY_VOCAB.filter((s) => seniorityText.includes(s)), ...earlyLevelTerms(seniorityText)];
 
   // Locations from the stated preference, split on common separators. The
   // sweep treats these as "counts as local" markers; remote postings match

@@ -14,7 +14,7 @@ import {
   workdaySearchWords,
 } from "@kairos/engine/sourcing/adapters";
 import { dreamQueries, fetchDreamCompany } from "@kairos/engine/sourcing/dream-watch";
-import { functionGateVerdict } from "@kairos/engine/sourcing/filter";
+import { functionGateVerdict, passesFunctionGate } from "@kairos/engine/sourcing/filter";
 import { deriveSearchProfile, feedSearchTerms, mergeSearchProfile } from "@kairos/engine/sourcing/search-profile";
 import { fetchBoards, searchProfileWarnings, sweepFetchOptions } from "@kairos/engine/sourcing/sweep";
 import { buildTriagePrompt } from "@kairos/engine/sourcing/triage";
@@ -255,9 +255,44 @@ describe("deriveSearchProfile: neutral defaults", () => {
 
   it("excludes early-career titles only for a profile that states a senior level", () => {
     const senior = deriveSearchProfile({ target_roles: ["Senior Financial Analyst"] });
-    expect(senior.function_terms).toEqual(["financial", "analyst"]); // "senior" is a level, not a function
+    expect(senior.function_terms).toEqual(["financial"]); // "senior" is a level, and "analyst" is a word many professions share
     expect(senior.exclude_terms).toEqual(["intern", "internship", "junior", "apprentice"]);
     expect(deriveSearchProfile({ target_roles: ["Software Engineer"], target_seniority: "Principal" }).exclude_terms).toContain("intern");
+  });
+});
+
+describe("deriveSearchProfile: every target role gives its own words", () => {
+  it("a role in a built-in discipline does not silence a role outside them", () => {
+    const p = deriveSearchProfile({ target_roles: ["Management Consultant", "Finance Associate"] });
+    expect(p.function_terms).toEqual(["consultant", "finance"]);
+    expect(passesFunctionGate("Strategy Consultant", p)).toBe(true);
+    expect(passesFunctionGate("Senior Associate, Corporate Finance", p)).toBe(true);
+  });
+
+  it("leaves out the words many professions share, so one of them alone lets nothing through", () => {
+    const p = deriveSearchProfile({ target_roles: ["Management Consultant"] });
+    expect(p.function_terms).toEqual(["consultant"]);
+    expect(passesFunctionGate("Project Management Lead", p)).toBe(false);
+    expect(deriveSearchProfile({ target_roles: ["Registered Nurse"] }).function_terms).toEqual(["registered", "nurse"]);
+  });
+
+  it("searches a role made only of shared words as one phrase", () => {
+    const p = deriveSearchProfile({ target_roles: ["Business Development Intern"] });
+    expect(p.function_terms).toEqual(["business development"]);
+    expect(passesFunctionGate("Business Development Intern, Oncology", p)).toBe(true);
+    expect(passesFunctionGate("Sales Development Representative", p)).toBe(false);
+    expect(passesFunctionGate("People Business Partner", p)).toBe(false);
+    expect(deriveSearchProfile({ target_roles: ["Account Executive"] }).function_terms).toEqual(["account executive"]);
+  });
+
+  it("ranks the early-career titles a student asks for, and removes none", () => {
+    const intern = deriveSearchProfile({ target_roles: ["Business Development Intern"] });
+    expect(intern.seniority_terms).toEqual(expect.arrayContaining(["intern", "internship"]));
+    expect(intern.exclude_terms).toEqual([]);
+    expect(deriveSearchProfile({ target_roles: ["Strategy Consultant"], target_seniority: "MBA summer associate" }).seniority_terms).toEqual(expect.arrayContaining(["summer", "mba", "associate"]));
+    // "Associate Director" is a senior title: "associate" alone would rank junior titles up.
+    expect(deriveSearchProfile({ target_roles: ["Associate Director, Strategy"] }).seniority_terms).toEqual(["director"]);
+    expect(deriveSearchProfile({ target_roles: ["Software Engineer"], target_seniority: "Principal" }).seniority_terms).toEqual(["principal"]);
   });
 });
 
