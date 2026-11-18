@@ -216,8 +216,16 @@ const PDFTOTEXT_CANDIDATES = [
 
 let pdftotextResolved: string | null | undefined;
 
+/**
+ * Set to "1", poppler (pdfinfo, pdftotext) is treated as absent, as on a Windows PC, where it has no
+ * standard installer: the layout check then reads the PDF in JavaScript (layout-probe.ts) and the ATS
+ * text check answers "not available". The tests and the comparison of the two readings use it.
+ */
+export const popplerOff = (): boolean => process.env.KAIROS_NO_POPPLER === "1";
+
 /** Absolute path of an executable pdftotext, or null when poppler is absent. Cached. */
 export async function pdftotextPath(): Promise<string | null> {
+  if (popplerOff()) return null;
   if (pdftotextResolved !== undefined) return pdftotextResolved;
   for (const candidate of PDFTOTEXT_CANDIDATES) {
     if (isRunnable(candidate)) return (pdftotextResolved = candidate);

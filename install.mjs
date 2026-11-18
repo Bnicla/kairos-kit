@@ -319,7 +319,7 @@ async function main() {
 
     if (!onPath("git")) warn("git not found. /update needs it (https://git-scm.com/download/win), and Claude Code on Windows uses the Git Bash that comes with it.");
 
-    if (findLibreOffice()) ok("LibreOffice found (PDF copies of your résumés)");
+    if (findLibreOffice()) ok("LibreOffice found (PDF copies of your résumés, and page counts measured on them)");
     else warn("LibreOffice not found (optional). Without it you get the Word file only, and page fit is estimated instead of measured. The installer is at https://www.libreoffice.org.");
 
     if (/[\\/]OneDrive/i.test(KIT)) warn("The kit is inside a OneDrive folder. OneDrive tries to sync the thousands of package files and can lock them during an install; move the kit to a folder OneDrive does not sync (for example kairos-kit in your user folder).");

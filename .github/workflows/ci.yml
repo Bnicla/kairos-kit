@@ -67,7 +67,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          node install.mjs --schedule-only --no-daily
+          # Only when the installer ran (it records the data folder in .kairos-home).
+          if (Test-Path .kairos-home) { node install.mjs --schedule-only --no-daily }
           Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kairos Kit dashboard.cmd" -ErrorAction SilentlyContinue
 
   # LibreOffice on Windows: found where its installer puts it, and a Word

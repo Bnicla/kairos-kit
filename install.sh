@@ -120,7 +120,7 @@ else
 fi
 
 if [ -x /Applications/LibreOffice.app/Contents/MacOS/soffice ] || command -v soffice >/dev/null; then
-  ok "LibreOffice found (PDF copies of your résumés; with poppler, page counts measured on them)"
+  ok "LibreOffice found (PDF copies of your résumés, and page counts measured on them)"
 else
   warn "LibreOffice not found (optional). Without it you get the Word file only, and page fit is estimated instead of measured. 'brew install --cask libreoffice' adds it."
 fi

@@ -131,11 +131,13 @@ base it did not create unless you add `--use-existing`.
 Optional:
 - LibreOffice (`brew install --cask libreoffice` on a Mac, the installer from
   libreoffice.org on Windows), for a PDF copy of each résumé beside the Word
-  file. Without it you get the Word file only.
-- poppler (`brew install poppler` on a Mac), with LibreOffice, for a page
-  count measured on the rendered résumé. Without both, page fit is estimated
-  from the word count. Windows has no standard installer for poppler; the
-  measured count works there when `pdfinfo` and `pdftotext` are on your PATH.
+  file and a page count measured on that PDF. Without it you get the Word file
+  only, and page fit is estimated from the word count.
+- poppler (`brew install poppler` on a Mac), with LibreOffice, for one more
+  check: the PDF's text is read the way an applicant-tracking system reads it
+  (contact details present as text, reading order, no broken characters).
+  Windows has no standard installer for poppler; without it that check is
+  skipped and says so, and the page count is still measured.
 - The Claude in Chrome extension, connected to Claude Code, for `/apply`:
   Claude fills an application form open in your Chrome, one page at a time.
   You submit.

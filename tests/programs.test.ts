@@ -31,7 +31,9 @@ describe("finding and starting programs", () => {
   const unix = { platform: "darwin" as const, env: { PATH: `${bin}:${other}` } };
 
   it("finds a program through PATH, with Windows's endings in Windows's order", () => {
-    expect(findProgram("soffice", unix)).toBe(plain);
+    // The macOS and Linux rule splits PATH on ":", which a Windows path holds after its drive letter:
+    // that rule is run where it applies.
+    if (process.platform !== "win32") expect(findProgram("soffice", unix)).toBe(plain);
     expect(findProgram("no-such-program", unix)).toBeNull();
     // "npm" is npm.cmd on Windows, never the shell script beside it.
     expect(findProgram("npm", windows)).toBe(npmCmd);
@@ -44,7 +46,7 @@ describe("finding and starting programs", () => {
   it("a folder of that name is not a program", () => {
     mkdirSync(join(other, "claude"));
     expect(isRunnable(join(other, "claude"))).toBe(false);
-    expect(findProgram("claude", { platform: "darwin", env: { PATH: other } })).toBeNull();
+    expect(findProgram("claude", { platform: process.platform, env: { PATH: other } })).toBeNull();
   });
 
   it("starts a program unchanged on macOS and Linux", () => {
@@ -55,7 +57,10 @@ describe("finding and starting programs", () => {
     const npm = startCommand("npm", ["-w", "kairos-local", "run", "sourcing-run"], windows);
     expect(npm.file).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(npm.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
-    expect(npm.args[3]).toBe(`"${npmCmd.includes(" ") ? `"${npmCmd}"` : npmCmd} -w kairos-local run sourcing-run"`);
+    // The program's path is quoted when it holds a space or any character outside the plainly safe ones
+    // (the "~" of a short Windows folder name, for one), and left as it is otherwise.
+    const quoted = /^[A-Za-z0-9_\-.:\\/=@+,]+$/.test(npmCmd) ? npmCmd : `"${npmCmd}"`;
+    expect(npm.args[3]).toBe(`"${quoted} -w kairos-local run sourcing-run"`);
     expect(npm.options).toEqual({ windowsVerbatimArguments: true });
     expect(startCommand(toolExe, ["--version"], windows)).toEqual({ file: toolExe, args: ["--version"], options: {} });
   });

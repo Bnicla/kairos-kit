@@ -2479,7 +2479,7 @@ async function resumeLayout(appId: string): Promise<Record<string, unknown>> {
   const source = await readResumeSource(store, appId);
   const atsExpect = source ? atsExpectFromMarkdown(source) : undefined;
   const layout = await withAppDir(store, appId, (dir) => probeResumeLayout(`${dir}/resume.docx`, { page2Anchor, atsExpect }), await ownDocx(appId, "resume"));
-  if (!layout) return { available: false, note: "Layout probe unavailable (LibreOffice/poppler not found); rely on the word-count gate." };
+  if (!layout) return { available: false, note: "Layout probe unavailable (LibreOffice not found); rely on the word-count gate." };
   const { ats, ...rest } = layout;
   return { available: true, verdict_text: layoutVerdictText(layout), ats, ...rest };
 }

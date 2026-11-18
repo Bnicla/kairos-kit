@@ -161,7 +161,8 @@ describe("Kairos MCP server: record, register and paper", () => {
     expect(status.data_folder.home).toBe(home);
     const form = JSON.parse(text(await client.callTool({ name: "get_form_profile", arguments: { appId } })));
     const attached = JSON.stringify(form);
-    expect(attached).toContain(join(home, "applications", appId));
+    // The path as JSON text holds it: on Windows each backslash is written twice there.
+    expect(attached).toContain(JSON.stringify(join(home, "applications", appId)).slice(1, -1));
   }, 60_000);
 });
 
