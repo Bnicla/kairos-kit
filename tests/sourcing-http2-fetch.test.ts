@@ -62,9 +62,12 @@ describe("http2Fetch keeps the process alive while a request is in flight", () =
   it("lets a script that only awaits a slow answer finish", async () => {
     const { execFileSync } = await import("node:child_process");
     // A child process whose only pending work is one HTTP/2 request answered after 300 ms.
+    // The file is loaded as CommonJS (no "type": "module"): Node 25 sees its named export, Node 22 (the Kit's CI)
+    // gives it only as the default object, so the script takes it from either.
     const script = `
       import http2 from "node:http2";
-      import { http2Fetch } from "./packages/engine/sourcing/http2-fetch.ts";
+      const m = await import("./packages/engine/sourcing/http2-fetch.ts");
+      const http2Fetch = m.http2Fetch ?? m.default.http2Fetch;
       const server = http2.createServer((req, res) => setTimeout(() => { res.writeHead(200); res.end("ok"); }, 300));
       server.listen(0, "127.0.0.1", () => { server.unref(); const port = server.address().port;
         http2Fetch("http://127.0.0.1:" + port + "/").then(async (r) => { console.log("status", r.status, await r.text()); });
