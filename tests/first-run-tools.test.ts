@@ -415,6 +415,24 @@ describe("Kairos MCP server: the first import after a document was read", () => 
     // (The Writer's evidence needs a score first; that it carries the list is tested in tests/trial-fixes.test.ts.)
   }, 60_000);
 
+  it("two scorers at once each get their own job ad, and the evidence opens with the application it belongs to", async () => {
+    const store = new LocalStore(home);
+    const a = (await createApplication(store, { company: "Northwind Labs", role: "Data Platform Lead", snapshotMarkdown: "# Data Platform Lead\nLogging pipelines at Northwind Labs.", source_url_unavailable: true })).id;
+    const b = (await createApplication(store, { company: "Brightwater Systems", role: "Agent Platform Director", snapshotMarkdown: "# Agent Platform Director\nAgent builders at Brightwater Systems.", source_url_unavailable: true })).id;
+    const calls = await Promise.all([a, b, a, b, a, b].map((appId) => client.callTool({ name: "get_scoring_evidence", arguments: { appId } })));
+    calls.forEach((r, i) => {
+      const own = i % 2 === 0 ? { appId: a, company: "Northwind Labs", ad: "Logging pipelines", other: "Agent builders" } : { appId: b, company: "Brightwater Systems", ad: "Agent builders", other: "Logging pipelines" };
+      const raw = text(r);
+      // The first key of the result names the application, so a reader of a saved copy sees it on the first lines.
+      expect(Object.keys(JSON.parse(raw))[0]).toBe("evidence_for");
+      const ev = JSON.parse(raw);
+      expect(ev.evidence_for).toMatchObject({ appId: own.appId, company: own.company });
+      expect(ev.evidence_for.check).toMatch(/call the tool again/);
+      expect(ev.user_message).toContain(own.ad);
+      expect(ev.user_message).not.toContain(own.other);
+    });
+  }, 60_000);
+
   it("a résumé that differs from the knowledge base is saved, with what to put right; a choice the user makes once is remembered in the profile, shown to them, and not raised again", async () => {
     const appId = (await createApplication(new LocalStore(home), { company: "Northwind", role: "Software Engineer", snapshotMarkdown: "# Software Engineer\nPython.", source_url_unavailable: true })).id;
     const resume = {

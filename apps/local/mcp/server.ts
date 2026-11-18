@@ -179,6 +179,23 @@ function guard<A>(fn: (args: A) => Promise<ToolResult>) {
   };
 }
 
+/**
+ * The application an evidence result belongs to, put first in the result. An evidence result is large, and
+ * Claude Code saves a large result to a file named after the tool and the millisecond; on 2026-11-18 two
+ * scorers working at once got the same file, and one read the other's job ad under its own appId. With this
+ * at the head of the result, the reader sees whose evidence it holds before anything else.
+ */
+function evidenceFor(meta: { id: string; company: string; role: string }): Record<string, unknown> {
+  return {
+    evidence_for: {
+      appId: meta.id,
+      company: meta.company,
+      role: meta.role,
+      check: "This evidence is for the application above. If this is not the appId you asked for, do not use it: call the tool again.",
+    },
+  };
+}
+
 /** Read the readable ad text out of a snapshot (drop the frontmatter). */
 function snapshotText(snapshot: string | null): string {
   if (!snapshot) return "";
@@ -1857,7 +1874,7 @@ server.registerTool(
       profileFacts: profileFactsFrom(await readProfile()),
       track: await trackFor(meta),
     });
-    return ok({ ...snapshotGuard(snapshot), system_prompt: wordedText(SCORING_SYSTEM_PROMPT), user_message });
+    return ok({ ...evidenceFor(meta), ...snapshotGuard(snapshot), system_prompt: wordedText(SCORING_SYSTEM_PROMPT), user_message });
   }),
 );
 
@@ -2063,8 +2080,9 @@ server.registerTool(
   },
   guard(async ({ appId, contact, relationship, ask }) => {
     const e = await referralMessageEvidence(store, appId, { contact, relationship, ask });
-    const snapshot = await readSnapshot(store, appId);
+    const [snapshot, meta] = await Promise.all([readSnapshot(store, appId), readMeta(store, appId)]);
     return ok({
+      ...(meta ? evidenceFor(meta) : {}),
       ...snapshotGuard(snapshot),
       system_prompt: e.system_prompt,
       user_message: e.user_message,
@@ -2185,7 +2203,7 @@ server.registerTool(
       // (Until 15 November 2026 nothing was passed, and every Writer was told to fill two pages.)
       targetPages: resumeLengthPolicy(experiences, { override: profile.target_pages === 1 || profile.target_pages === 2 ? profile.target_pages : undefined }).targetPages,
     });
-    return ok({ ...snapshotGuard(snapshot), system_prompt: wordedText(GENERATION_SYSTEM_PROMPT), user_message });
+    return ok({ ...evidenceFor(meta), ...snapshotGuard(snapshot), system_prompt: wordedText(GENERATION_SYSTEM_PROMPT), user_message });
   }),
 );
 
@@ -2311,7 +2329,7 @@ server.registerTool(
       date: new Date().toISOString().slice(0, 10),
       track: await trackFor(meta),
     });
-    return ok({ ...snapshotGuard(snapshot), system_prompt: COVER_LETTER_SYSTEM_PROMPT, user_message });
+    return ok({ ...evidenceFor(meta), ...snapshotGuard(snapshot), system_prompt: COVER_LETTER_SYSTEM_PROMPT, user_message });
   }),
 );
 

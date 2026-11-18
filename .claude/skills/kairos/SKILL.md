@@ -69,6 +69,11 @@ search." Then the three specialists the user meets first, in one line each
    `get_generation_evidence` return `{ system_prompt, user_message }`. Treat the
    `system_prompt` as your exact instructions and produce JSON matching the
    OUTPUT CONTRACT inside the `user_message`. Do not paraphrase the method.
+   Every evidence result for an application opens with `evidence_for`
+   (appId, company, role). Check it is the application you asked for before
+   using anything in it; if it is not, call the tool again. A large result
+   comes back as a saved file, and two calls at the same moment can end up
+   in the same file.
 3. **Bands, never fake percentages.** Match is STRONG / COMPETITIVE / DEVELOPING
    / WEAK with a confidence and the pool caveat. Never a single fake-precise %.
 4. **Facts are confirmed, never assumed.** A new fact the user mentions enters
