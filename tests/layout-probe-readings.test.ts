@@ -78,10 +78,11 @@ describe("reading the rendered PDF without poppler (unpdf)", () => {
 });
 
 describe("the two readings agree", () => {
-  // Only where poppler is installed (the owner's Mac, the hosted connector's image); the Kit's CI has none.
+  // Only where both of poppler's programs are installed (the owner's Mac, the hosted connector's image).
+  // The Kit's Linux CI has neither; a Windows PC with Git for Windows has pdftotext and no pdfinfo
+  // (seen in the Kit's Windows CI on 19 November 2026), and the layout check reads with unpdf there.
   it("on the page count, the first line of page 2 and the fill", async () => {
-    const pdftotext = await pdftotextPath();
-    if (!pdftotext) return;
+    if ((await pdfReading()) !== "poppler") return;
     const pdf = file("agree.pdf", [page(22), page(17, "Research Lead | 2018 - 2020")]);
     const withPoppler = await measurePdf(pdf, "poppler");
     const without = await measurePdf(pdf, "unpdf");
